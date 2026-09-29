@@ -6,15 +6,14 @@
 <title>Панель задач Weeek</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
-body { font-family: Arial, sans-serif; margin: 0; padding: 25px; color: #222; background: #f5f7fa; }
+body { font-family: Arial, sans-serif; margin: 0; padding: 25px; background: #f5f7fa; color: #222; }
 .container { max-width: 1500px; margin: auto; }
-h1, h2 { color: #263238; }
 .updated { color: #667085; margin-bottom: 20px; }
 .cards { display: flex; flex-wrap: wrap; gap: 15px; margin: 20px 0; }
-.card { min-width: 150px; padding: 18px; border: 1px solid #ddd; border-radius: 10px; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+.card { min-width: 150px; padding: 18px; border-radius: 10px; background: white; box-shadow: 0 2px 8px rgba(0,0,0,.05); }
 .card span { display: block; margin-top: 8px; font-size: 28px; font-weight: bold; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
-.panel { background: white; border-radius: 10px; padding: 20px; margin: 20px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+.panel { background: white; border-radius: 10px; padding: 20px; margin: 20px 0; box-shadow: 0 2px 8px rgba(0,0,0,.05); }
 .chart { min-height: 350px; }
 table { width: 100%; border-collapse: collapse; margin-top: 15px; }
 th, td { border: 1px solid #ddd; padding: 9px; text-align: left; vertical-align: top; }
@@ -26,7 +25,7 @@ tr:nth-child(even) { background: #fafafa; }
 <body>
 <div class="container">
 <h1>Панель задач Weeek</h1>
-<div class="updated">Данные обновлены: 29.09.2026 21:11, Красноярск</div>
+<div class="updated">Данные обновлены: 29.09.2026 21:20, Красноярск</div>
 <div class="cards">
 <div class="card"><b>Всего задач</b><span>27</span></div>
 <div class="card"><b>Проектов</b><span>2</span></div>
@@ -38,24 +37,18 @@ tr:nth-child(even) { background: #fafafa; }
 <div class="panel"><h2>Задачи по статусам</h2><div class="chart"><canvas id="statusChart"></canvas></div></div>
 <div class="panel"><h2>Задачи по проектам</h2><div class="chart"><canvas id="projectChart"></canvas></div></div>
 </div>
-<div class="panel">
-<h2>Сводка по статусам</h2>
+<div class="panel"><h2>Сводка по статусам</h2>
 <table><tr><th>Статус</th><th>Количество</th><th>Процент</th></tr>
 <tr><td>Выполнено</td><td>16</td><td>59.3%</td></tr><tr><td>Просрочено</td><td>1</td><td>3.7%</td></tr><tr><td>Не начато</td><td>10</td><td>37.0%</td></tr>
-</table>
-</div>
-<div class="panel">
-<h2>Сводка по проектам</h2>
+</table></div>
+<div class="panel"><h2>Сводка по проектам</h2>
 <table><tr><th>Проект</th><th>Количество задач</th></tr>
 <tr><td>Хозяйственная деятельность 2026-27</td><td>20</td></tr><tr><td>Участие в отборе на грант</td><td>7</td></tr>
-</table>
-</div>
-<div class="panel">
-<h2>Все задачи</h2>
+</table></div>
+<div class="panel"><h2>Все задачи</h2>
 <table><tr><th>ID</th><th>Проект</th><th>Задача</th><th>Статус</th><th>Срок</th></tr>
 <tr><td>219</td><td>Хозяйственная деятельность 2026-27</td><td>Просчитать материалы для освещения на заезде к Лесная 20</td><td>Не начато</td><td></td></tr><tr><td>218</td><td>Хозяйственная деятельность 2026-27</td><td>Проверить состояние кюветов</td><td>Не начато</td><td></td></tr><tr><td>217</td><td>Хозяйственная деятельность 2026-27</td><td>Проверить состояние кустарников и посадок на зиму</td><td>Не начато</td><td></td></tr><tr><td>216</td><td>Хозяйственная деятельность 2026-27</td><td>Забрать столбы с Полевой 29</td><td>Не начато</td><td></td></tr><tr><td>215</td><td>Хозяйственная деятельность 2026-27</td><td>Заменить прожектор возле Лесная 2</td><td>Не начато</td><td></td></tr><tr><td>214</td><td>Хозяйственная деятельность 2026-27</td><td>Видеонаблюдение</td><td>Не начато</td><td></td></tr><tr><td>213</td><td>Хозяйственная деятельность 2026-27</td><td>Заказать еще один WiFi мост</td><td>Выполнено</td><td></td></tr><tr><td>212</td><td>Хозяйственная деятельность 2026-27</td><td>Переводы в резервный фонд</td><td>Не начато</td><td></td></tr><tr><td>211</td><td>Хозяйственная деятельность 2026-27</td><td>Просчитать обязательные платежи до конца периода, оплатить что возможно</td><td>Выполнено</td><td></td></tr><tr><td>210</td><td>Хозяйственная деятельность 2026-27</td><td>Просчитать баланс по долгам Мамай с учетом оплат</td><td>Выполнено</td><td></td></tr><tr><td>209</td><td>Хозяйственная деятельность 2026-27</td><td>Оплатить Потаповой юр услуги</td><td>Выполнено</td><td></td></tr><tr><td>208</td><td>Хозяйственная деятельность 2026-27</td><td>Собрать все доки по долгам Мамай, сформировать пакет</td><td>Выполнено</td><td></td></tr><tr><td>207</td><td>Хозяйственная деятельность 2026-27</td><td>Заменить камеру на втором въезде</td><td>Выполнено</td><td></td></tr><tr><td>206</td><td>Хозяйственная деятельность 2026-27</td><td>Устранить проблемы с сетью на камере Полевой</td><td>Выполнено</td><td></td></tr><tr><td>205</td><td>Хозяйственная деятельность 2026-27</td><td>Узнать у Черноморца по чистке снега</td><td>Выполнено</td><td></td></tr><tr><td>204</td><td>Хозяйственная деятельность 2026-27</td><td>Обследование электроустановок</td><td>Выполнено</td><td></td></tr><tr><td>203</td><td>Хозяйственная деятельность 2026-27</td><td>Ревизия колодцев и скважин на зимний период</td><td>Просрочено</td><td>2026-09-29</td></tr><tr><td>202</td><td>Хозяйственная деятельность 2026-27</td><td>Вбить стойки</td><td>Не начато</td><td></td></tr><tr><td>201</td><td>Хозяйственная деятельность 2026-27</td><td>Нарастить кабеля</td><td>Не начато</td><td></td></tr><tr><td>200</td><td>Хозяйственная деятельность 2026-27</td><td>Запитать от щита Полины</td><td>Не начато</td><td></td></tr><tr><td>144</td><td>Участие в отборе на грант</td><td>Собрать пакт документов на отчеты</td><td>Выполнено</td><td></td></tr><tr><td>141</td><td>Участие в отборе на грант</td><td>Квартальный отчет</td><td>Выполнено</td><td></td></tr><tr><td>136</td><td>Участие в отборе на грант</td><td>Поступление средств</td><td>Выполнено</td><td>2026-08-03</td></tr><tr><td>51</td><td>Участие в отборе на грант</td><td>Заключение соглашений</td><td>Выполнено</td><td>2026-08-13</td></tr><tr><td>50</td><td>Участие в отборе на грант</td><td>Объявление победителей</td><td>Выполнено</td><td>2026-08-06</td></tr><tr><td>49</td><td>Участие в отборе на грант</td><td>Рассмотрение заявок</td><td>Выполнено</td><td>2026-07-30</td></tr><tr><td>48</td><td>Участие в отборе на грант</td><td>Подача заявки</td><td>Выполнено</td><td>2026-05-04</td></tr>
-</table>
-</div>
+</table></div>
 <script>
 new Chart(document.getElementById('statusChart'), {
 type: 'bar',
