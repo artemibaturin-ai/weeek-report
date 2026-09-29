@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from collections import Counter
+from datetime import datetime, timezone, timedelta
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -52,8 +53,9 @@ def get_projects():
     print(f"Найдено проектов: {len(projects)}")
 
     for project in projects:
-        name = project.get("title") or project.get("name")
-        print(f"Проект {project.get('id')}: {name}")
+        project_id = project.get("id")
+        project_name = project.get("title") or project.get("name")
+        print(f"Проект {project_id}: {project_name}")
 
     return projects
 
@@ -107,6 +109,36 @@ def get_status(task):
     return "Не начато"
 
 
+def make_unique_tasks(tasks):
+    unique_tasks = {}
+
+    for task in tasks:
+        task_id = task.get("id")
+
+        if task_id is None:
+            continue
+
+        old_task = unique_tasks.get(task_id)
+
+        if old_task is None:
+            unique_tasks[task_id] = task
+            continue
+
+        old_updated = old_task.get("updatedAt") or ""
+        new_updated = task.get("updatedAt") or ""
+
+        if new_updated >= old_updated:
+            unique_tasks[task_id] = task
+
+    result = list(unique_tasks.values())
+    result.sort(key=lambda item: item.get("id", 0), reverse=True)
+
+    print(f"До удаления дублей: {len(tasks)}")
+    print(f"После удаления дублей: {len(result)}")
+
+    return result
+
+
 def prepare_rows(tasks, project_names):
     rows = []
 
@@ -158,15 +190,38 @@ def save_html(rows):
     status_counts = Counter(row["status"] for row in rows)
     project_counts = Counter(row["project"] for row in rows)
 
-    status_labels = list(status_counts.keys())
-    status_values = [status_counts[label] for label in status_labels]
+    status_order = [
+        "Выполнено",
+        "Просрочено",
+        "Запланировано",
+        "Не начато",
+        "Удалено",
+    ]
+
+    status_labels = [
+        status for status in status_order
+        if status in status_counts
+    ]
+
+    for status in status_counts:
+        if status not in status_labels:
+            status_labels.append(status)
+
+    status_values = [
+        status_counts[status]
+        for status in status_labels
+    ]
 
     project_labels = list(project_counts.keys())
-    project_values = [project_counts[label] for label in project_labels]
+    project_values = [
+        project_counts[project]
+        for project in project_labels
+    ]
 
     status_table = ""
 
-    for status, count in status_counts.items():
+    for status in status_labels:
+        count = status_counts[status]
         percent = round(count / len(rows) * 100, 1) if rows else 0
 
         status_table += f"""
@@ -179,11 +234,11 @@ def save_html(rows):
 
     project_table = ""
 
-    for project, count in project_counts.items():
+    for project in project_labels:
         project_table += f"""
         <tr>
             <td>{html.escape(project)}</td>
-            <td>{count}</td>
+            <td>{project_counts[project]}</td>
         </tr>
         """
 
@@ -199,6 +254,9 @@ def save_html(rows):
             <td>{html.escape(str(row["dueDate"]))}</td>
         </tr>
         """
+
+    now = datetime.now(timezone.utc) + timedelta(hours=7)
+    updated_at = now.strftime("%d.%m.%Y %H:%M")
 
     html_report = f"""<!DOCTYPE html>
 <html lang="ru">
@@ -316,7 +374,7 @@ tr:nth-child(even) {{
 <h1>Панель задач Weeek</h1>
 
 <div class="updated">
-    Данные обновлены: {html.escape(__import__("datetime").datetime.now().strftime("%d.%m.%Y %H:%M"))}
+    Данные обновлены: {updated_at}, Красноярск
 </div>
 
 <div class="cards">
@@ -492,7 +550,8 @@ def main():
 
         all_tasks.extend(project_tasks)
 
-    rows = prepare_rows(all_tasks, project_names)
+    unique_tasks = make_unique_tasks(all_tasks)
+    rows = prepare_rows(unique_tasks, project_names)
 
     save_csv(rows)
     save_json(rows)
@@ -501,12 +560,5 @@ def main():
     print()
     print("Готово.")
     print(f"Обработано проектов: {len(projects)}")
-    print(f"Обработано задач: {len(rows)}")
-    print("Созданы файлы:")
-    print("- index.html")
-    print("- weeek_tasks.csv")
-    print("- weeek_tasks.json")
-
-
-if __name__ == "__main__":
-    main()
+    print(f"Уникальных задач: {len(rows)}")
+    print("Созданы
