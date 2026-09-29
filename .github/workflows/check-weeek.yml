@@ -22,20 +22,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Проверить версию Python
-        run: python --version
+      - name: Проверить синтаксис Python
+        run: python -m py_compile weeek_report.py
 
       - name: Получить данные и создать панель
         env:
           WEEEK_TOKEN: ${{ secrets.WEEEK_TOKEN }}
-        run: python weeek_report.py
+        run: python -u weeek_report.py
 
       - name: Проверить созданные файлы
         run: |
-          ls -la
-          test -f index.html
-          test -f weeek_tasks.csv
-          test -f weeek_tasks.json
+          test -s index.html
+          test -s weeek_tasks.csv
+          test -s weeek_tasks.json
+          echo "Файлы созданы успешно"
+          ls -lh index.html weeek_tasks.csv weeek_tasks.json
 
       - name: Сохранить результат в GitHub
         run: |
