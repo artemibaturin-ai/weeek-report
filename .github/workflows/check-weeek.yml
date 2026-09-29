@@ -20,3 +20,8 @@ jobs:
         env:
           WEEEK_TOKEN: ${{ secrets.WEEEK_TOKEN }}
         run: python weeek_report.py
+      - name: Сохранить результат
+        uses: actions/upload-artifact@v4
+        with:
+          name: weeek-data
+          path: weeek_profile.json
