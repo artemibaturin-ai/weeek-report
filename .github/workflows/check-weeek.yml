@@ -5,7 +5,7 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Скачать код
@@ -16,12 +16,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Проверить доступ к Weeek
+      - name: Получить данные Weeek
         env:
           WEEEK_TOKEN: ${{ secrets.WEEEK_TOKEN }}
         run: python weeek_report.py
+
       - name: Сохранить результат
         uses: actions/upload-artifact@v4
         with:
-          name: weeek-data
-          path: weeek_profile.json
+          name: weeek-api-data
+          path: weeek_api_data.json
