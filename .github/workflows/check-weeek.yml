@@ -1,14 +1,20 @@
-name: Отчет по задачам Weeek
+name: Обновление веб-панели Weeek
 
 on:
   workflow_dispatch:
 
+  schedule:
+    - cron: "0 1 * * *"
+
+permissions:
+  contents: write
+
 jobs:
-  report:
+  update-dashboard:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Скачать код
+      - name: Скачать репозиторий
         uses: actions/checkout@v4
 
       - name: Установить Python
@@ -16,16 +22,17 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Создать отчет Weeek
+      - name: Получить данные и создать веб-панель
         env:
           WEEEK_TOKEN: ${{ secrets.WEEEK_TOKEN }}
         run: python weeek_report.py
 
-      - name: Сохранить отчет
-        uses: actions/upload-artifact@v4
-        with:
-          name: weeek-report
-          path: |
-            weeek_report.html
-            weeek_tasks.csv
-            weeek_tasks.json
+      - name: Сохранить CSV и JSON
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add index.html weeek_tasks.csv weeek_tasks.json
+
+          git diff --cached --quiet || git commit -m "Обновление панели Weeek"
+          git push
