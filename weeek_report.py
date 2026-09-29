@@ -32,8 +32,7 @@ def api_get(path, params=None):
 
     try:
         with urlopen(request, timeout=60) as response:
-            content = response.read().decode("utf-8")
-            return json.loads(content)
+            return json.loads(response.read().decode("utf-8"))
 
     except HTTPError as error:
         body = error.read().decode("utf-8", errors="replace")
@@ -47,37 +46,41 @@ def api_get(path, params=None):
         sys.exit(1)
 
 
-def get_all_projects():
+def get_projects():
     result = api_get("/tm/projects")
     projects = result.get("projects", [])
 
-    project_names = {}
+    print(f"Найдено проектов: {len(projects)}")
 
     for project in projects:
-        project_id = project.get("id")
-        project_name = (
-            project.get("title")
-            or project.get("name")
-            or f"Проект {project_id}"
+        print(
+            f"Проект {project.get('id')}: "
+            f"{project.get('title') or project.get('name')}"
         )
 
-        project_names[project_id] = project_name
-
-    print(f"Получено проектов: {len(project_names)}")
-    return project_names
+    return projects
 
 
-def get_all_tasks():
+def get_tasks_for_project(project_id):
     all_tasks = []
     page = 1
 
     while True:
-        result = api_get("/tm/tasks", {"page": page})
-        tasks = result.get("tasks", [])
+        result = api_get(
+            "/tm/tasks",
+            {
+                "projectId": project_id,
+                "page": page,
+            },
+        )
 
+        tasks = result.get("tasks", [])
         all_tasks.extend(tasks)
 
-        print(f"Страница {page}: получено задач — {len(tasks)}")
+        print(
+            f"Проект {project_id}, страница {page}: "
+            f"получено задач — {len(tasks)}"
+        )
 
         if not result.get("hasMore") or not tasks:
             break
@@ -85,14 +88,13 @@ def get_all_tasks():
         page += 1
 
         if page > 100:
-            print("Остановлено после 100 страниц")
+            print(f"Проект {project_id}: остановка после 100 страниц")
             break
 
-    print(f"Всего загружено задач: {len(all_tasks)}")
     return all_tasks
 
 
-def get_task_status(task):
+def get_status(task):
     if task.get("isDeleted"):
         return "Удалено"
 
@@ -108,7 +110,7 @@ def get_task_status(task):
     return "Не начато"
 
 
-def prepare_rows(tasks, project_names):
+def make_rows(tasks, project_names):
     rows = []
 
     for task in tasks:
@@ -116,10 +118,10 @@ def prepare_rows(tasks, project_names):
 
         rows.append({
             "id": task.get("id", ""),
+            "projectId": project_id or "",
             "project": project_names.get(project_id, "Без проекта"),
-            "projectId": project_id if project_id is not None else "",
             "title": task.get("title", ""),
-            "status": get_task_status(task),
+            "status": get_status(task),
             "isCompleted": task.get("isCompleted", False),
             "overdue": task.get("overdue", 0),
             "dueDate": task.get("dueDate") or "",
@@ -133,8 +135,8 @@ def prepare_rows(tasks, project_names):
 def save_csv(rows):
     columns = [
         "id",
-        "project",
         "projectId",
+        "project",
         "title",
         "status",
         "isCompleted",
@@ -150,51 +152,27 @@ def save_csv(rows):
         writer.writerows(rows)
 
 
-def make_html_report(rows):
+def save_json(rows):
+    with open("weeek_tasks.json", "w", encoding="utf-8") as file:
+        json.dump(rows, file, ensure_ascii=False, indent=2)
+
+
+def save_html(rows):
     status_counts = Counter(row["status"] for row in rows)
     project_counts = Counter(row["project"] for row in rows)
 
-    status_order = [
-        "Выполнено",
-        "Просрочено",
-        "Запланировано",
-        "Не начато",
-        "Удалено",
-    ]
-
-    status_labels = [
-        status for status in status_order
-        if status in status_counts
-    ]
-
-    for status in status_counts:
-        if status not in status_labels:
-            status_labels.append(status)
-
-    status_values = [
-        status_counts[status]
-        for status in status_labels
-    ]
+    status_labels = list(status_counts.keys())
+    status_values = [status_counts[label] for label in status_labels]
 
     project_labels = list(project_counts.keys())
-    project_values = [
-        project_counts[project]
-        for project in project_labels
-    ]
+    project_values = [project_counts[label] for label in project_labels]
 
-    status_labels_json = json.dumps(status_labels, ensure_ascii=False)
-    status_values_json = json.dumps(status_values)
+    status_table = ""
 
-    project_labels_json = json.dumps(project_labels, ensure_ascii=False)
-    project_values_json = json.dumps(project_values)
-
-    status_rows = ""
-
-    for status in status_labels:
-        count = status_counts[status]
+    for status, count in status_counts.items():
         percent = round(count / len(rows) * 100, 1) if rows else 0
 
-        status_rows += f"""
+        status_table += f"""
         <tr>
             <td>{html.escape(status)}</td>
             <td>{count}</td>
@@ -202,20 +180,20 @@ def make_html_report(rows):
         </tr>
         """
 
-    project_rows = ""
+    project_table = ""
 
-    for project in project_labels:
-        project_rows += f"""
+    for project, count in project_counts.items():
+        project_table += f"""
         <tr>
             <td>{html.escape(project)}</td>
-            <td>{project_counts[project]}</td>
+            <td>{count}</td>
         </tr>
         """
 
-    task_rows = ""
+    task_table = ""
 
     for row in rows:
-        task_rows += f"""
+        task_table += f"""
         <tr>
             <td>{row["id"]}</td>
             <td>{html.escape(row["project"])}</td>
@@ -225,13 +203,12 @@ def make_html_report(rows):
         </tr>
         """
 
-    report = f"""<!DOCTYPE html>
+    html_report = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Отчет по задачам Weeek</title>
-
+<title>Отчет Weeek</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
@@ -239,7 +216,6 @@ body {{
     font-family: Arial, sans-serif;
     margin: 30px;
     color: #222;
-    background: #fff;
 }}
 
 h1, h2 {{
@@ -259,10 +235,6 @@ h1, h2 {{
     border: 1px solid #ddd;
     border-radius: 10px;
     background: #f7f7f7;
-}}
-
-.card b {{
-    font-size: 14px;
 }}
 
 .card span {{
@@ -287,7 +259,6 @@ th, td {{
     border: 1px solid #ddd;
     padding: 8px;
     text-align: left;
-    vertical-align: top;
 }}
 
 th {{
@@ -297,22 +268,13 @@ th {{
 tr:nth-child(even) {{
     background: #fafafa;
 }}
-
-.note {{
-    padding: 12px;
-    border-left: 4px solid #4299e1;
-    background: #ebf8ff;
-}}
 </style>
 </head>
 
 <body>
 
 <h1>Отчет по задачам Weeek</h1>
-
-<div class="note">
-Отчет сформирован по всем проектам и всем загруженным страницам задач.
-</div>
+<p>В отчет включены задачи всех проектов.</p>
 
 <div class="cards">
     <div class="card">
@@ -341,63 +303,55 @@ tr:nth-child(even) {{
     </div>
 </div>
 
-<h2>Распределение задач по статусам</h2>
-
+<h2>Задачи по статусам</h2>
 <div class="chart">
     <canvas id="statusChart"></canvas>
 </div>
 
-<h2>Распределение задач по проектам</h2>
-
+<h2>Задачи по проектам</h2>
 <div class="chart">
     <canvas id="projectChart"></canvas>
 </div>
 
 <h2>Сводка по статусам</h2>
-
 <table>
-    <tr>
-        <th>Статус</th>
-        <th>Количество</th>
-        <th>Доля</th>
-    </tr>
-    {status_rows}
+<tr>
+    <th>Статус</th>
+    <th>Количество</th>
+    <th>Процент</th>
+</tr>
+{status_table}
 </table>
 
 <h2>Сводка по проектам</h2>
-
 <table>
-    <tr>
-        <th>Проект</th>
-        <th>Количество задач</th>
-    </tr>
-    {project_rows}
+<tr>
+    <th>Проект</th>
+    <th>Количество задач</th>
+</tr>
+{project_table}
 </table>
 
-<h2>Полный список задач</h2>
-
+<h2>Все задачи</h2>
 <table>
-    <tr>
-        <th>ID</th>
-        <th>Проект</th>
-        <th>Задача</th>
-        <th>Статус</th>
-        <th>Срок</th>
-    </tr>
-    {task_rows}
+<tr>
+    <th>ID</th>
+    <th>Проект</th>
+    <th>Задача</th>
+    <th>Статус</th>
+    <th>Срок</th>
+</tr>
+{task_table}
 </table>
 
 <script>
-const statusLabels = {status_labels_json};
-const statusValues = {status_values_json};
-
 new Chart(document.getElementById("statusChart"), {{
     type: "bar",
     data: {{
-        labels: statusLabels,
+        labels: {json.dumps(status_labels, ensure_ascii=False)},
         datasets: [{{
             label: "Количество задач",
-            data: statusValues,
+            data: {json.dumps(status_values)},
             backgroundColor: [
                 "#38a169",
                 "#e53e3e",
@@ -412,24 +366,19 @@ new Chart(document.getElementById("statusChart"), {{
         scales: {{
             y: {{
                 beginAtZero: true,
-                ticks: {{
-                    precision: 0
-                }}
+                ticks: {{ precision: 0 }}
             }}
         }}
     }}
 }});
 
-const projectLabels = {project_labels_json};
-const projectValues = {project_values_json};
-
 new Chart(document.getElementById("projectChart"), {{
     type: "bar",
     data: {{
-        labels: projectLabels,
+        labels: {json.dumps(project_labels, ensure_ascii=False)},
         datasets: [{{
             label: "Количество задач",
-            data: projectValues,
+            data: {json.dumps(project_values)},
             backgroundColor: "#4299e1"
         }}]
     }},
@@ -439,9 +388,7 @@ new Chart(document.getElementById("projectChart"), {{
         scales: {{
             x: {{
                 beginAtZero: true,
-                ticks: {{
-                    precision: 0
-                }}
+                ticks: {{ precision: 0 }}
             }}
         }}
     }}
@@ -453,36 +400,46 @@ new Chart(document.getElementById("projectChart"), {{
 """
 
     with open("weeek_report.html", "w", encoding="utf-8") as file:
-        file.write(report)
-
-
-def save_json(rows):
-    with open("weeek_tasks.json", "w", encoding="utf-8") as file:
-        json.dump(rows, file, ensure_ascii=False, indent=2)
+        file.write(html_report)
 
 
 def main():
-    print("Получение проектов...")
-    project_names = get_all_projects()
+    projects = get_projects()
 
-    print("Получение задач...")
-    tasks = get_all_tasks()
+    project_names = {
+        project.get("id"): (
+            project.get("title")
+            or project.get("name")
+            or f"Проект {project.get('id')}"
+        )
+        for project in projects
+    }
 
-    rows = prepare_rows(tasks, project_names)
+    all_tasks = []
+
+    for project in projects:
+        project_id = project.get("id")
+        project_tasks = get_tasks_for_project(project_id)
+
+        for task in project_tasks:
+            task["projectId"] = project_id
+
+        all_tasks.extend(project_tasks)
+
+    rows = make_rows(all_tasks, project_names)
 
     save_csv(rows)
     save_json(rows)
-    make_html_report(rows)
+    save_html(rows)
 
     print()
     print("Готово.")
-    print(f"Всего задач: {len(rows)}")
-    print(f"Проектов: {len(set(row['project'] for row in rows))}")
-    print()
+    print(f"Проектов обработано: {len(projects)}")
+    print(f"Задач обработано: {len(rows)}")
     print("Созданы файлы:")
-    print("weeek_report.html")
-    print("weeek_tasks.csv")
-    print("weeek_tasks.json")
+    print("- weeek_report.html")
+    print("- weeek_tasks.csv")
+    print("- weeek_tasks.json")
 
 
 if __name__ == "__main__":
