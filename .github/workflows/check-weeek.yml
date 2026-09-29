@@ -1,10 +1,10 @@
-name: Проверка Weeek API
+name: Отчет по задачам Weeek
 
 on:
   workflow_dispatch:
 
 jobs:
-  check:
+  report:
     runs-on: ubuntu-24.04
 
     steps:
@@ -16,13 +16,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Получить данные Weeek
+      - name: Создать отчет Weeek
         env:
           WEEEK_TOKEN: ${{ secrets.WEEEK_TOKEN }}
         run: python weeek_report.py
 
-      - name: Сохранить результат
+      - name: Сохранить отчет
         uses: actions/upload-artifact@v4
         with:
-          name: weeek-api-data
-          path: weeek_api_data.json
+          name: weeek-report
+          path: |
+            weeek_report.html
+            weeek_tasks.csv
+            weeek_tasks.json
