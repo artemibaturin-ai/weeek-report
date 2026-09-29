@@ -9,12 +9,11 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 TOKEN = os.environ.get("WEEEK_TOKEN")
+BASE_URL = "https://api.weeek.net/public/v1"
 
 if not TOKEN:
     print("Ошибка: секрет WEEEK_TOKEN не передан")
     sys.exit(1)
-
-BASE_URL = "https://api.weeek.net/public/v1"
 
 
 def api_get(path, params=None):
@@ -53,10 +52,8 @@ def get_projects():
     print(f"Найдено проектов: {len(projects)}")
 
     for project in projects:
-        print(
-            f"Проект {project.get('id')}: "
-            f"{project.get('title') or project.get('name')}"
-        )
+        name = project.get("title") or project.get("name")
+        print(f"Проект {project.get('id')}: {name}")
 
     return projects
 
@@ -110,7 +107,7 @@ def get_status(task):
     return "Не начато"
 
 
-def make_rows(tasks, project_names):
+def prepare_rows(tasks, project_names):
     rows = []
 
     for task in tasks:
@@ -208,18 +205,31 @@ def save_html(rows):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Отчет Weeek</title>
+<title>Панель задач Weeek</title>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
 body {{
     font-family: Arial, sans-serif;
-    margin: 30px;
+    margin: 0;
+    padding: 25px;
     color: #222;
+    background: #f5f7fa;
+}}
+
+.container {{
+    max-width: 1500px;
+    margin: auto;
 }}
 
 h1, h2 {{
-    color: #333;
+    color: #263238;
+}}
+
+.updated {{
+    color: #667085;
+    margin-bottom: 20px;
 }}
 
 .cards {{
@@ -234,47 +244,80 @@ h1, h2 {{
     padding: 18px;
     border: 1px solid #ddd;
     border-radius: 10px;
-    background: #f7f7f7;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }}
 
 .card span {{
     display: block;
     margin-top: 8px;
-    font-size: 25px;
+    font-size: 28px;
     font-weight: bold;
 }}
 
+.grid {{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 25px;
+}}
+
+.panel {{
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    margin: 20px 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}}
+
 .chart {{
-    max-width: 900px;
-    margin: 25px 0 45px;
+    min-height: 350px;
 }}
 
 table {{
     width: 100%;
     border-collapse: collapse;
-    margin: 15px 0 40px;
+    margin-top: 15px;
 }}
 
 th, td {{
     border: 1px solid #ddd;
-    padding: 8px;
+    padding: 9px;
     text-align: left;
+    vertical-align: top;
 }}
 
 th {{
-    background: #f0f0f0;
+    background: #eef2f6;
 }}
 
 tr:nth-child(even) {{
     background: #fafafa;
 }}
+
+@media (max-width: 900px) {{
+    .grid {{
+        grid-template-columns: 1fr;
+    }}
+
+    body {{
+        padding: 12px;
+    }}
+
+    table {{
+        font-size: 13px;
+    }}
+}}
 </style>
 </head>
 
 <body>
+<div class="container">
 
-<h1>Отчет по задачам Weeek</h1>
-<p>В отчет включены задачи всех проектов.</p>
+<h1>Панель задач Weeek</h1>
+
+<div class="updated">
+    Данные обновлены: {html.escape(__import__("datetime").datetime.now().strftime("%d.%m.%Y %H:%M"))}
+</div>
 
 <div class="cards">
     <div class="card">
@@ -303,46 +346,61 @@ tr:nth-child(even) {{
     </div>
 </div>
 
-<h2>Задачи по статусам</h2>
-<div class="chart">
-    <canvas id="statusChart"></canvas>
+<div class="grid">
+    <div class="panel">
+        <h2>Задачи по статусам</h2>
+        <div class="chart">
+            <canvas id="statusChart"></canvas>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>Задачи по проектам</h2>
+        <div class="chart">
+            <canvas id="projectChart"></canvas>
+        </div>
+    </div>
 </div>
 
-<h2>Задачи по проектам</h2>
-<div class="chart">
-    <canvas id="projectChart"></canvas>
+<div class="panel">
+    <h2>Сводка по статусам</h2>
+
+    <table>
+        <tr>
+            <th>Статус</th>
+            <th>Количество</th>
+            <th>Процент</th>
+        </tr>
+        {status_table}
+    </table>
 </div>
 
-<h2>Сводка по статусам</h2>
-<table>
-<tr>
-    <th>Статус</th>
-    <th>Количество</th>
-    <th>Процент</th>
-</tr>
-{status_table}
-</table>
+<div class="panel">
+    <h2>Сводка по проектам</h2>
 
-<h2>Сводка по проектам</h2>
-<table>
-<tr>
-    <th>Проект</th>
-    <th>Количество задач</th>
-</tr>
-{project_table}
-</table>
+    <table>
+        <tr>
+            <th>Проект</th>
+            <th>Количество задач</th>
+        </tr>
+        {project_table}
+    </table>
+</div>
 
-<h2>Все задачи</h2>
-<table>
-<tr>
-    <th>ID</th>
-    <th>Проект</th>
-    <th>Задача</th>
-    <th>Статус</th>
-    <th>Срок</th>
-</tr>
-{task_table}
-</table>
+<div class="panel">
+    <h2>Все задачи</h2>
+
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>Проект</th>
+            <th>Задача</th>
+            <th>Статус</th>
+            <th>Срок</th>
+        </tr>
+        {task_table}
+    </table>
+</div>
 
 <script>
 new Chart(document.getElementById("statusChart"), {{
@@ -363,10 +421,13 @@ new Chart(document.getElementById("statusChart"), {{
     }},
     options: {{
         responsive: true,
+        maintainAspectRatio: false,
         scales: {{
             y: {{
                 beginAtZero: true,
-                ticks: {{ precision: 0 }}
+                ticks: {{
+                    precision: 0
+                }}
             }}
         }}
     }}
@@ -385,25 +446,30 @@ new Chart(document.getElementById("projectChart"), {{
     options: {{
         indexAxis: "y",
         responsive: true,
+        maintainAspectRatio: false,
         scales: {{
             x: {{
                 beginAtZero: true,
-                ticks: {{ precision: 0 }}
+                ticks: {{
+                    precision: 0
+                }}
             }}
         }}
     }}
 }});
 </script>
 
+</div>
 </body>
 </html>
 """
 
-    with open("weeek_report.html", "w", encoding="utf-8") as file:
+    with open("index.html", "w", encoding="utf-8") as file:
         file.write(html_report)
 
 
 def main():
+    print("Получение списка проектов...")
     projects = get_projects()
 
     project_names = {
@@ -426,7 +492,7 @@ def main():
 
         all_tasks.extend(project_tasks)
 
-    rows = make_rows(all_tasks, project_names)
+    rows = prepare_rows(all_tasks, project_names)
 
     save_csv(rows)
     save_json(rows)
@@ -434,10 +500,10 @@ def main():
 
     print()
     print("Готово.")
-    print(f"Проектов обработано: {len(projects)}")
-    print(f"Задач обработано: {len(rows)}")
+    print(f"Обработано проектов: {len(projects)}")
+    print(f"Обработано задач: {len(rows)}")
     print("Созданы файлы:")
-    print("- weeek_report.html")
+    print("- index.html")
     print("- weeek_tasks.csv")
     print("- weeek_tasks.json")
 
