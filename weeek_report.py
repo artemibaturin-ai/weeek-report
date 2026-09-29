@@ -118,20 +118,20 @@ def make_unique_tasks(tasks):
         if task_id is None:
             continue
 
-        old_task = unique_tasks.get(task_id)
+        previous = unique_tasks.get(task_id)
 
-        if old_task is None:
+        if previous is None:
             unique_tasks[task_id] = task
             continue
 
-        old_updated = old_task.get("updatedAt") or ""
-        new_updated = task.get("updatedAt") or ""
+        old_date = previous.get("updatedAt") or ""
+        new_date = task.get("updatedAt") or ""
 
-        if new_updated >= old_updated:
+        if new_date >= old_date:
             unique_tasks[task_id] = task
 
     result = list(unique_tasks.values())
-    result.sort(key=lambda item: item.get("id", 0), reverse=True)
+    result.sort(key=lambda task: task.get("id", 0), reverse=True)
 
     print(f"До удаления дублей: {len(tasks)}")
     print(f"После удаления дублей: {len(result)}")
@@ -218,312 +218,135 @@ def save_html(rows):
         for project in project_labels
     ]
 
-    status_table = ""
+    status_table = []
 
     for status in status_labels:
         count = status_counts[status]
         percent = round(count / len(rows) * 100, 1) if rows else 0
 
-        status_table += f"""
-        <tr>
-            <td>{html.escape(status)}</td>
-            <td>{count}</td>
-            <td>{percent}%</td>
-        </tr>
-        """
+        status_table.append(
+            "<tr>"
+            f"<td>{html.escape(status)}</td>"
+            f"<td>{count}</td>"
+            f"<td>{percent}%</td>"
+            "</tr>"
+        )
 
-    project_table = ""
+    project_table = []
 
     for project in project_labels:
-        project_table += f"""
-        <tr>
-            <td>{html.escape(project)}</td>
-            <td>{project_counts[project]}</td>
-        </tr>
-        """
+        project_table.append(
+            "<tr>"
+            f"<td>{html.escape(project)}</td>"
+            f"<td>{project_counts[project]}</td>"
+            "</tr>"
+        )
 
-    task_table = ""
+    task_table = []
 
     for row in rows:
-        task_table += f"""
-        <tr>
-            <td>{row["id"]}</td>
-            <td>{html.escape(row["project"])}</td>
-            <td>{html.escape(row["title"])}</td>
-            <td>{html.escape(row["status"])}</td>
-            <td>{html.escape(str(row["dueDate"]))}</td>
-        </tr>
-        """
+        task_table.append(
+            "<tr>"
+            f"<td>{row['id']}</td>"
+            f"<td>{html.escape(row['project'])}</td>"
+            f"<td>{html.escape(row['title'])}</td>"
+            f"<td>{html.escape(row['status'])}</td>"
+            f"<td>{html.escape(str(row['dueDate']))}</td>"
+            "</tr>"
+        )
 
     now = datetime.now(timezone.utc) + timedelta(hours=7)
     updated_at = now.strftime("%d.%m.%Y %H:%M")
 
-    html_report = f"""<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Панель задач Weeek</title>
+    status_labels_json = json.dumps(status_labels, ensure_ascii=False)
+    status_values_json = json.dumps(status_values)
+    project_labels_json = json.dumps(project_labels, ensure_ascii=False)
+    project_values_json = json.dumps(project_values)
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-<style>
-body {{
-    font-family: Arial, sans-serif;
-    margin: 0;
-    padding: 25px;
-    color: #222;
-    background: #f5f7fa;
-}}
-
-.container {{
-    max-width: 1500px;
-    margin: auto;
-}}
-
-h1, h2 {{
-    color: #263238;
-}}
-
-.updated {{
-    color: #667085;
-    margin-bottom: 20px;
-}}
-
-.cards {{
-    display: flex;
-    flex-wrap: wrap;
-    gap: 15px;
-    margin: 20px 0;
-}}
-
-.card {{
-    min-width: 150px;
-    padding: 18px;
-    border: 1px solid #ddd;
-    border-radius: 10px;
-    background: white;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-}}
-
-.card span {{
-    display: block;
-    margin-top: 8px;
-    font-size: 28px;
-    font-weight: bold;
-}}
-
-.grid {{
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 25px;
-}}
-
-.panel {{
-    background: white;
-    border-radius: 10px;
-    padding: 20px;
-    margin: 20px 0;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-}}
-
-.chart {{
-    min-height: 350px;
-}}
-
-table {{
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 15px;
-}}
-
-th, td {{
-    border: 1px solid #ddd;
-    padding: 9px;
-    text-align: left;
-    vertical-align: top;
-}}
-
-th {{
-    background: #eef2f6;
-}}
-
-tr:nth-child(even) {{
-    background: #fafafa;
-}}
-
-@media (max-width: 900px) {{
-    .grid {{
-        grid-template-columns: 1fr;
-    }}
-
-    body {{
-        padding: 12px;
-    }}
-
-    table {{
-        font-size: 13px;
-    }}
-}}
-</style>
-</head>
-
-<body>
-<div class="container">
-
-<h1>Панель задач Weeek</h1>
-
-<div class="updated">
-    Данные обновлены: {updated_at}, Красноярск
-</div>
-
-<div class="cards">
-    <div class="card">
-        <b>Всего задач</b>
-        <span>{len(rows)}</span>
-    </div>
-
-    <div class="card">
-        <b>Проектов</b>
-        <span>{len(project_counts)}</span>
-    </div>
-
-    <div class="card">
-        <b>Выполнено</b>
-        <span>{status_counts.get("Выполнено", 0)}</span>
-    </div>
-
-    <div class="card">
-        <b>Просрочено</b>
-        <span>{status_counts.get("Просрочено", 0)}</span>
-    </div>
-
-    <div class="card">
-        <b>Не начато</b>
-        <span>{status_counts.get("Не начато", 0)}</span>
-    </div>
-</div>
-
-<div class="grid">
-    <div class="panel">
-        <h2>Задачи по статусам</h2>
-        <div class="chart">
-            <canvas id="statusChart"></canvas>
-        </div>
-    </div>
-
-    <div class="panel">
-        <h2>Задачи по проектам</h2>
-        <div class="chart">
-            <canvas id="projectChart"></canvas>
-        </div>
-    </div>
-</div>
-
-<div class="panel">
-    <h2>Сводка по статусам</h2>
-
-    <table>
-        <tr>
-            <th>Статус</th>
-            <th>Количество</th>
-            <th>Процент</th>
-        </tr>
-        {status_table}
-    </table>
-</div>
-
-<div class="panel">
-    <h2>Сводка по проектам</h2>
-
-    <table>
-        <tr>
-            <th>Проект</th>
-            <th>Количество задач</th>
-        </tr>
-        {project_table}
-    </table>
-</div>
-
-<div class="panel">
-    <h2>Все задачи</h2>
-
-    <table>
-        <tr>
-            <th>ID</th>
-            <th>Проект</th>
-            <th>Задача</th>
-            <th>Статус</th>
-            <th>Срок</th>
-        </tr>
-        {task_table}
-    </table>
-</div>
-
-<script>
-new Chart(document.getElementById("statusChart"), {{
-    type: "bar",
-    data: {{
-        labels: {json.dumps(status_labels, ensure_ascii=False)},
-        datasets: [{{
-            label: "Количество задач",
-            data: {json.dumps(status_values)},
-            backgroundColor: [
-                "#38a169",
-                "#e53e3e",
-                "#dd6b20",
-                "#718096",
-                "#805ad5"
-            ]
-        }}]
-    }},
-    options: {{
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {{
-            y: {{
-                beginAtZero: true,
-                ticks: {{
-                    precision: 0
-                }}
-            }}
-        }}
-    }}
-}});
-
-new Chart(document.getElementById("projectChart"), {{
-    type: "bar",
-    data: {{
-        labels: {json.dumps(project_labels, ensure_ascii=False)},
-        datasets: [{{
-            label: "Количество задач",
-            data: {json.dumps(project_values)},
-            backgroundColor: "#4299e1"
-        }}]
-    }},
-    options: {{
-        indexAxis: "y",
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {{
-            x: {{
-                beginAtZero: true,
-                ticks: {{
-                    precision: 0
-                }}
-            }}
-        }}
-    }}
-}});
-</script>
-
-</div>
-</body>
-</html>
-"""
+    html_lines = [
+        "<!DOCTYPE html>",
+        '<html lang="ru">',
+        "<head>",
+        '<meta charset="UTF-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        "<title>Панель задач Weeek</title>",
+        '<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>',
+        "<style>",
+        "body { font-family: Arial, sans-serif; margin: 0; padding: 25px; color: #222; background: #f5f7fa; }",
+        ".container { max-width: 1500px; margin: auto; }",
+        "h1, h2 { color: #263238; }",
+        ".updated { color: #667085; margin-bottom: 20px; }",
+        ".cards { display: flex; flex-wrap: wrap; gap: 15px; margin: 20px 0; }",
+        ".card { min-width: 150px; padding: 18px; border: 1px solid #ddd; border-radius: 10px; background: white; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }",
+        ".card span { display: block; margin-top: 8px; font-size: 28px; font-weight: bold; }",
+        ".grid { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }",
+        ".panel { background: white; border-radius: 10px; padding: 20px; margin: 20px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }",
+        ".chart { min-height: 350px; }",
+        "table { width: 100%; border-collapse: collapse; margin-top: 15px; }",
+        "th, td { border: 1px solid #ddd; padding: 9px; text-align: left; vertical-align: top; }",
+        "th { background: #eef2f6; }",
+        "tr:nth-child(even) { background: #fafafa; }",
+        "@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } body { padding: 12px; } table { font-size: 13px; } }",
+        "</style>",
+        "</head>",
+        "<body>",
+        '<div class="container">',
+        "<h1>Панель задач Weeek</h1>",
+        f'<div class="updated">Данные обновлены: {updated_at}, Красноярск</div>',
+        '<div class="cards">',
+        f'<div class="card"><b>Всего задач</b><span>{len(rows)}</span></div>',
+        f'<div class="card"><b>Проектов</b><span>{len(project_counts)}</span></div>',
+        f'<div class="card"><b>Выполнено</b><span>{status_counts.get("Выполнено", 0)}</span></div>',
+        f'<div class="card"><b>Просрочено</b><span>{status_counts.get("Просрочено", 0)}</span></div>',
+        f'<div class="card"><b>Не начато</b><span>{status_counts.get("Не начато", 0)}</span></div>',
+        "</div>",
+        '<div class="grid">',
+        '<div class="panel"><h2>Задачи по статусам</h2><div class="chart"><canvas id="statusChart"></canvas></div></div>',
+        '<div class="panel"><h2>Задачи по проектам</h2><div class="chart"><canvas id="projectChart"></canvas></div></div>',
+        "</div>",
+        '<div class="panel">',
+        "<h2>Сводка по статусам</h2>",
+        "<table><tr><th>Статус</th><th>Количество</th><th>Процент</th></tr>",
+        "".join(status_table),
+        "</table>",
+        "</div>",
+        '<div class="panel">',
+        "<h2>Сводка по проектам</h2>",
+        "<table><tr><th>Проект</th><th>Количество задач</th></tr>",
+        "".join(project_table),
+        "</table>",
+        "</div>",
+        '<div class="panel">',
+        "<h2>Все задачи</h2>",
+        "<table><tr><th>ID</th><th>Проект</th><th>Задача</th><th>Статус</th><th>Срок</th></tr>",
+        "".join(task_table),
+        "</table>",
+        "</div>",
+        "<script>",
+        "new Chart(document.getElementById('statusChart'), {",
+        "type: 'bar',",
+        "data: {",
+        f"labels: {status_labels_json},",
+        f"datasets: [{{ label: 'Количество задач', data: {status_values_json}, backgroundColor: ['#38a169', '#e53e3e', '#dd6b20', '#718096', '#805ad5'] }}]",
+        "},",
+        "options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }",
+        "});",
+        "new Chart(document.getElementById('projectChart'), {",
+        "type: 'bar',",
+        "data: {",
+        f"labels: {project_labels_json},",
+        f"datasets: [{{ label: 'Количество задач', data: {project_values_json}, backgroundColor: '#4299e1' }}]",
+        "},",
+        "options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } }",
+        "});",
+        "</script>",
+        "</div>",
+        "</body>",
+        "</html>",
+    ]
 
     with open("index.html", "w", encoding="utf-8") as file:
-        file.write(html_report)
+        file.write("\n".join(html_lines))
 
 
 def main():
@@ -543,12 +366,12 @@ def main():
 
     for project in projects:
         project_id = project.get("id")
-        project_tasks = get_tasks_for_project(project_id)
+        tasks = get_tasks_for_project(project_id)
 
-        for task in project_tasks:
+        for task in tasks:
             task["projectId"] = project_id
 
-        all_tasks.extend(project_tasks)
+        all_tasks.extend(tasks)
 
     unique_tasks = make_unique_tasks(all_tasks)
     rows = prepare_rows(unique_tasks, project_names)
@@ -557,8 +380,11 @@ def main():
     save_json(rows)
     save_html(rows)
 
-    print()
     print("Готово.")
-    print(f"Обработано проектов: {len(projects)}")
+    print(f"Проектов: {len(projects)}")
     print(f"Уникальных задач: {len(rows)}")
-    print("Созданы
+    print("Созданы файлы: index.html, weeek_tasks.csv, weeek_tasks.json")
+
+
+if __name__ == "__main__":
+    main()
