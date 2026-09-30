@@ -1,115 +1,189 @@
+import csv
 import json
 import os
-import sys
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from datetime import datetime
+from pathlib import Path
+
+import requests
+
+
+BASE_DIR = Path(__file__).resolve().parent
+PUBLIC_DIR = BASE_DIR / "public"
+PUBLIC_DIR.mkdir(exist_ok=True)
 
 TOKEN = os.environ.get("WEEEK_TOKEN")
-BASE_URL = "https://api.weeek.net/public/v1"
 
 if not TOKEN:
-    print("Ошибка: секрет WEEEK_TOKEN не передан")
-    sys.exit(1)
+    raise RuntimeError("Не найден секрет WEEEK_TOKEN")
+
+HEADERS = {
+    "Authorization": f"Bearer {TOKEN}",
+    "Content-Type": "application/json",
+}
+
+API_URL = "https://api.weeek.net/public/v1"
 
 
-def api_get(path, params):
-    url = BASE_URL + path + "?" + urlencode(params)
+def get_tasks():
+    response = requests.get(
+        f"{API_URL}/tm/tasks",
+        headers=HEADERS,
+        timeout=30,
+    )
+    response.raise_for_status()
 
-    request = Request(
-        url,
-        headers={
-            "Authorization": f"Bearer {TOKEN}",
-            "Accept": "application/json",
-        },
-        method="GET",
+    data = response.json()
+
+    if isinstance(data, dict):
+        return data.get("tasks", data.get("data", []))
+
+    return data
+
+
+def task_title(task):
+    return (
+        task.get("title")
+        or task.get("name")
+        or task.get("text")
+        or "Без названия"
     )
 
-    try:
-        with urlopen(request, timeout=60) as response:
-            body = response.read().decode("utf-8")
-            return {
-                "url": url,
-                "status": response.status,
-                "body": json.loads(body),
-            }
 
-    except HTTPError as error:
-        return {
-            "url": url,
-            "status": error.code,
-            "body": error.read().decode("utf-8", errors="replace"),
-        }
+def task_status(task):
+    status = task.get("status")
 
-    except URLError as error:
-        return {
-            "url": url,
-            "status": "connection_error",
-            "body": str(error.reason),
-        }
+    if isinstance(status, dict):
+        return (
+            status.get("name")
+            or status.get("title")
+            or status.get("id")
+            or "Не указан"
+        )
+
+    return str(status or "Не указан")
 
 
-def summarize(result):
-    body = result.get("body")
+def task_project(task):
+    project = task.get("project")
 
-    if not isinstance(body, dict):
-        return {
-            "status": result.get("status"),
-            "type": type(body).__name__,
-        }
+    if isinstance(project, dict):
+        return (
+            project.get("name")
+            or project.get("title")
+            or project.get("id")
+            or "Без проекта"
+        )
 
-    tasks = body.get("tasks", [])
+    return str(project or "Без проекта")
 
-    return {
-        "status": result.get("status"),
-        "task_count": len(tasks),
-        "first_ids": [task.get("id") for task in tasks[:10]],
-        "last_ids": [task.get("id") for task in tasks[-10:]],
-        "hasMore": body.get("hasMore"),
-        "keys": list(body.keys()),
+
+def task_due_date(task):
+    return (
+        task.get("dueDate")
+        or task.get("due_date")
+        or task.get("deadline")
+        or ""
+    )
+
+
+def is_completed(task):
+    value = task.get("completed")
+
+    if isinstance(value, bool):
+        return value
+
+    status = task_status(task).lower()
+
+    return status in {
+        "done",
+        "completed",
+        "complete",
+        "выполнено",
+        "завершено",
     }
 
 
-def main():
-    tests = [
-        {"projectId": 2},
-        {"projectId": 2, "page": 1},
-        {"projectId": 2, "page": 2},
-        {"projectId": 2, "page": 3},
-        {"projectId": 2, "limit": 100},
-        {"projectId": 2, "limit": 100, "offset": 0},
-        {"projectId": 2, "limit": 100, "offset": 100},
-        {"projectId": 2, "limit": 100, "offset": 200},
-        {"projectId": 2, "perPage": 100, "page": 1},
-        {"projectId": 2, "perPage": 100, "page": 2},
-        {"projectId": 2, "skip": 0},
-        {"projectId": 2, "skip": 100},
-        {"projectId": 2, "cursor": 0},
-        {"projectId": 2, "completed": False},
-        {"projectId": 2, "isCompleted": False},
+def is_overdue(task):
+    due_date = task_due_date(task)
+
+    if not due_date or is_completed(task):
+        return False
+
+    try:
+        date_text = str(due_date)[:10]
+        due = datetime.strptime(date_text, "%Y-%m-%d").date()
+        return due < datetime.now().date()
+    except ValueError:
+        return False
+
+
+def make_csv(tasks):
+    csv_path = PUBLIC_DIR / "weeek_tasks.csv"
+
+    fieldnames = [
+        "title",
+        "status",
+        "project",
+        "due_date",
+        "completed",
+        "overdue",
     ]
 
-    results = []
+    with csv_path.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
 
-    for params in tests:
-        result = api_get("/tm/tasks", params)
-
-        item = {
-            "params": params,
-            "summary": summarize(result),
-            "response": result,
-        }
-
-        results.append(item)
-
-        print(params)
-        print(item["summary"])
-
-    with open("weeek_pagination_tests.json", "w", encoding="utf-8") as file:
-        json.dump(results, file, ensure_ascii=False, indent=2)
-
-    print("Создан файл weeek_pagination_tests.json")
+        for task in tasks:
+            writer.writerow(
+                {
+                    "title": task_title(task),
+                    "status": task_status(task),
+                    "project": task_project(task),
+                    "due_date": task_due_date(task),
+                    "completed": "Да" if is_completed(task) else "Нет",
+                    "overdue": "Да" if is_overdue(task) else "Нет",
+                }
+            )
 
 
-if __name__ == "__main__":
-    main()
+def make_json(tasks):
+    json_path = PUBLIC_DIR / "weeek_tasks.json"
+
+    with json_path.open("w", encoding="utf-8") as file:
+        json.dump(tasks, file, ensure_ascii=False, indent=2)
+
+
+def make_html(tasks):
+    updated_at = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+    total = len(tasks)
+    completed = sum(is_completed(task) for task in tasks)
+    overdue = sum(is_overdue(task) for task in tasks)
+    not_started = total - completed
+
+    projects = {
+        task_project(task)
+        for task in tasks
+    }
+
+    rows = []
+
+    for task in tasks:
+        title = task_title(task)
+        status = task_status(task)
+        project = task_project(task)
+        due_date = task_due_date(task)
+
+        rows.append(
+            f"""
+            <tr>
+              <td>{title}</td>
+              <td>{status}</td>
+              <td>{project}</td>
+              <td>{due_date}</td>
+            </tr>
+            """
+        )
+
+    html = f"""<!doctype html>
+<html lang="ru">
