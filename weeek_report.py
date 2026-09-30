@@ -24,6 +24,7 @@ HEADERS = {
 }
 
 PAGE_SIZE = 100
+MAX_PAGES = 100
 
 
 def request_json(path, params):
@@ -37,7 +38,7 @@ def request_json(path, params):
     return response.json()
 
 
-def records_from(payload, kind):
+def find_records(payload, kind):
     if isinstance(payload, list):
         return payload
 
@@ -45,7 +46,7 @@ def records_from(payload, kind):
         return []
 
     names = (
-        (kind, "items", "results", "data")
+        ("tasks", "items", "results", "data")
         if kind == "tasks"
         else ("projects", "items", "results", "data")
     )
@@ -56,8 +57,11 @@ def records_from(payload, kind):
         if isinstance(value, list):
             return value
 
+    for name in names:
+        value = payload.get(name)
+
         if isinstance(value, dict):
-            nested = records_from(value, kind)
+            nested = find_records(value, kind)
 
             if nested:
                 return nested
@@ -67,18 +71,18 @@ def records_from(payload, kind):
 
 def load_collection(path, kind):
     result = []
-    known_ids = set()
+    seen_ids = set()
 
-    for page in range(1, 101):
+    for offset in range(0, MAX_PAGES * PAGE_SIZE, PAGE_SIZE):
         payload = request_json(
             path,
             {
-                "page": page,
                 "limit": PAGE_SIZE,
+                "offset": offset,
             },
         )
 
-        current = records_from(payload, kind)
+        current = find_records(payload, kind)
 
         if not current:
             break
@@ -94,15 +98,18 @@ def load_collection(path, kind):
             if item_id is not None:
                 key = str(item_id)
 
-                if key in known_ids:
+                if key in seen_ids:
                     continue
 
-                known_ids.add(key)
+                seen_ids.add(key)
 
             result.append(item)
             added += 1
 
-        if added == 0 or len(current) < PAGE_SIZE:
+        if added == 0:
+            break
+
+        if len(current) < PAGE_SIZE:
             break
 
     return result
@@ -115,10 +122,11 @@ def load_tasks():
         try:
             return load_collection(path, "tasks")
         except requests.HTTPError as error:
-            errors.append(str(error))
+            errors.append(f"{path}: {error}")
 
     raise RuntimeError(
-        "Ошибка загрузки задач: " + " | ".join(errors)
+        "Ошибка загрузки задач: "
+        + " | ".join(errors)
     )
 
 
@@ -129,19 +137,20 @@ def load_projects():
         try:
             return load_collection(path, "projects")
         except requests.HTTPError as error:
-            errors.append(str(error))
+            errors.append(f"{path}: {error}")
 
     raise RuntimeError(
-        "Ошибка загрузки проектов: " + " | ".join(errors)
+        "Ошибка загрузки проектов: "
+        + " | ".join(errors)
     )
 
 
-def first(item, names, default=""):
+def first(item, keys, default=""):
     if not isinstance(item, dict):
         return default
 
-    for name in names:
-        value = item.get(name)
+    for key in keys:
+        value = item.get(key)
 
         if value is not None and value != "":
             return value
@@ -159,7 +168,7 @@ def text(value, default=""):
             )
         )
 
-    if value in (None, ""):
+    if value is None or value == "":
         return default
 
     return str(value)
@@ -176,7 +185,7 @@ def task_title(task):
     )
 
 
-def project_id(task):
+def task_project_id(task):
     project = task.get("project")
 
     if isinstance(project, dict):
@@ -185,7 +194,7 @@ def project_id(task):
     return first(task, ("projectId", "project_id"), "")
 
 
-def project_name(task, projects_by_id):
+def task_project_name(task, projects_by_id):
     project = task.get("project")
 
     if isinstance(project, str) and project:
@@ -194,18 +203,18 @@ def project_name(task, projects_by_id):
     if isinstance(project, dict):
         return text(project, "Без проекта")
 
-    current_id = project_id(task)
+    project_id = task_project_id(task)
 
-    if current_id != "":
-        project_data = projects_by_id.get(str(current_id))
+    if project_id != "":
+        project_record = projects_by_id.get(str(project_id))
 
-        if project_data:
-            return text(project_data, "Без проекта")
+        if project_record:
+            return text(project_record, "Без проекта")
 
     return "Без проекта"
 
 
-def status_name(task):
+def task_status(task):
     status = task.get("status")
 
     if isinstance(status, str) and status:
@@ -224,7 +233,7 @@ def status_name(task):
     )
 
 
-def is_completed(task):
+def task_is_completed(task):
     value = first(
         task,
         ("isCompleted", "is_completed", "completed"),
@@ -245,7 +254,7 @@ def is_completed(task):
             "да",
         }
 
-    return status_name(task).lower() in {
+    return task_status(task).strip().lower() in {
         "выполнено",
         "завершено",
         "готово",
@@ -255,7 +264,7 @@ def is_completed(task):
     }
 
 
-def is_overdue(task):
+def task_overdue(task):
     value = first(
         task,
         ("overdue", "overdueDays", "overdue_days"),
@@ -268,7 +277,7 @@ def is_overdue(task):
         return False
 
 
-def due_date(task):
+def task_due_date(task):
     return first(
         task,
         ("dueDate", "due_date", "deadline", "date"),
@@ -276,7 +285,7 @@ def due_date(task):
     )
 
 
-def parent_id(task):
+def task_parent_id(task):
     value = first(
         task,
         (
@@ -312,8 +321,9 @@ def nested_tasks(task):
                 if isinstance(item, dict)
             )
 
-        if isinstance(value, dict):
-            nested = records_from(value, "tasks")
+        elif isinstance(value, dict):
+            nested = find_records(value, "tasks")
+
             result.extend(
                 item for item in nested
                 if isinstance(item, dict)
@@ -324,17 +334,17 @@ def nested_tasks(task):
 
 def flatten_tasks(tasks):
     result = []
-    known_ids = set()
+    seen_ids = set()
 
-    def add(task, parent=None):
+    def add_task(task, parent=None):
         current = dict(task)
 
         if parent is not None:
-            if not parent_id(current):
+            if not task_parent_id(current):
                 current["parentId"] = task_id(parent)
 
-            if not project_id(current):
-                current["projectId"] = project_id(parent)
+            if not task_project_id(current):
+                current["projectId"] = task_project_id(parent)
 
             if not current.get("project"):
                 current["project"] = parent.get("project", "")
@@ -344,30 +354,28 @@ def flatten_tasks(tasks):
         if current_id != "":
             key = str(current_id)
 
-            if key in known_ids:
+            if key in seen_ids:
                 return
 
-            known_ids.add(key)
+            seen_ids.add(key)
 
         result.append(current)
 
         for child in nested_tasks(current):
-            add(child, current)
+            add_task(child, current)
 
     for task in tasks:
-        add(task)
+        add_task(task)
 
     return result
 
 
-def escaped(value):
+def safe(value):
     return html.escape(str(value or ""), quote=True)
 
 
-def write_json(name, data):
-    path = PUBLIC_DIR / name
-
-    path.write_text(
+def write_json(filename, data):
+    (PUBLIC_DIR / filename).write_text(
         json.dumps(
             data,
             ensure_ascii=False,
@@ -390,9 +398,7 @@ def write_csv(tasks, projects_by_id):
         "due_date",
     ]
 
-    with (
-        PUBLIC_DIR / "weeek_tasks.csv"
-    ).open(
+    with (PUBLIC_DIR / "weeek_tasks.csv").open(
         "w",
         encoding="utf-8-sig",
         newline="",
@@ -407,79 +413,79 @@ def write_csv(tasks, projects_by_id):
             writer.writerow(
                 {
                     "id": task_id(task),
-                    "parent_id": parent_id(task),
-                    "project_id": project_id(task),
-                    "project": project_name(
+                    "parent_id": task_parent_id(task),
+                    "project_id": task_project_id(task),
+                    "project": task_project_name(
                         task,
                         projects_by_id,
                     ),
                     "title": task_title(task),
-                    "status": status_name(task),
+                    "status": task_status(task),
                     "is_completed": (
                         "Да"
-                        if is_completed(task)
+                        if task_is_completed(task)
                         else "Нет"
                     ),
                     "overdue": (
                         "Да"
-                        if is_overdue(task)
+                        if task_overdue(task)
                         else "Нет"
                     ),
-                    "due_date": due_date(task),
+                    "due_date": task_due_date(task),
                 }
             )
 
 
-def html_page(tasks, projects):
+def make_html(tasks, projects):
     projects_by_id = {
         str(project.get("id")): project
         for project in projects
         if project.get("id") is not None
     }
 
-    completed_count = sum(
-        is_completed(task)
+    completed = sum(
+        task_is_completed(task)
         for task in tasks
     )
 
-    overdue_count = sum(
-        is_overdue(task)
-        and not is_completed(task)
+    overdue = sum(
+        task_overdue(task)
+        and not task_is_completed(task)
         for task in tasks
     )
 
-    not_started_count = sum(
-        not is_completed(task)
-        and not is_overdue(task)
+    not_started = sum(
+        not task_is_completed(task)
+        and not task_overdue(task)
         for task in tasks
     )
 
-    statuses = Counter(
-        status_name(task)
+    status_counts = Counter(
+        task_status(task)
         for task in tasks
     )
 
     project_counts = Counter(
-        project_name(task, projects_by_id)
+        task_project_name(task, projects_by_id)
         for task in tasks
     )
 
     status_rows = "".join(
         "<tr><td>"
-        + escaped(name)
+        + safe(status)
         + "</td><td>"
         + str(count)
         + "</td></tr>"
-        for name, count in statuses.most_common()
+        for status, count in status_counts.most_common()
     )
 
     project_rows = "".join(
         "<tr><td>"
-        + escaped(name)
+        + safe(project)
         + "</td><td>"
         + str(count)
         + "</td></tr>"
-        for name, count in project_counts.most_common()
+        for project, count in project_counts.most_common()
     )
 
     task_rows = []
@@ -487,28 +493,24 @@ def html_page(tasks, projects):
     for task in tasks:
         title = task_title(task)
 
-        if parent_id(task):
+        if task_parent_id(task):
             title = "↳ " + title
 
-        row = (
+        task_rows.append(
             "<tr><td>"
-            + escaped(task_id(task))
+            + safe(task_id(task))
             + "</td><td>"
-            + escaped(project_name(task, projects_by_id))
+            + safe(task_project_name(task, projects_by_id))
             + "</td><td>"
-            + escaped(title)
+            + safe(title)
             + "</td><td>"
-            + escaped(status_name(task))
+            + safe(task_status(task))
             + "</td><td>"
-            + escaped(due_date(task))
+            + safe(task_due_date(task))
             + "</td></tr>"
         )
 
-        task_rows.append(row)
-
-    task_rows_html = "".join(task_rows)
-
-    page = """
+    html_document = """
 <!doctype html>
 <html lang="ru">
 <head>
@@ -546,8 +548,12 @@ main {
   font-size: 30px;
   font-weight: bold;
 }
-.label { color: #5f6368; }
-.table-wrapper { overflow-x: auto; }
+.label {
+  color: #5f6368;
+}
+.table-wrapper {
+  overflow-x: auto;
+}
 table {
   width: 100%;
   min-width: 700px;
@@ -559,7 +565,9 @@ th, td {
   text-align: left;
   vertical-align: top;
 }
-th { background: #eef1f4; }
+th {
+  background: #eef1f4;
+}
 </style>
 </head>
 <body>
@@ -593,7 +601,9 @@ th { background: #eef1f4; }
 <section class="panel">
 <h2>Задачи по статусам</h2>
 <table>
-<thead><tr><th>Статус</th><th>Количество</th></tr></thead>
+<thead>
+<tr><th>Статус</th><th>Количество</th></tr>
+</thead>
 <tbody>__STATUS_ROWS__</tbody>
 </table>
 </section>
@@ -601,7 +611,9 @@ th { background: #eef1f4; }
 <section class="panel">
 <h2>Задачи по проектам</h2>
 <table>
-<thead><tr><th>Проект</th><th>Количество</th></tr></thead>
+<thead>
+<tr><th>Проект</th><th>Количество</th></tr>
+</thead>
 <tbody>__PROJECT_ROWS__</tbody>
 </table>
 </section>
@@ -631,18 +643,24 @@ th { background: #eef1f4; }
     replacements = {
         "__TOTAL__": str(len(tasks)),
         "__PROJECTS__": str(len(projects)),
-        "__COMPLETED__": str(completed_count),
-        "__OVERDUE__": str(overdue_count),
-        "__NOT_STARTED__": str(not_started_count),
+        "__COMPLETED__": str(completed),
+        "__OVERDUE__": str(overdue),
+        "__NOT_STARTED__": str(not_started),
         "__STATUS_ROWS__": status_rows,
         "__PROJECT_ROWS__": project_rows,
-        "__TASK_ROWS__": task_rows_html,
+        "__TASK_ROWS__": "".join(task_rows),
     }
 
-    for marker, value in replacements.items():
-        page = page.replace(marker, value)
+    for marker, replacement in replacements.items():
+        html_document = html_document.replace(
+            marker,
+            replacement,
+        )
 
-    return page
+    (PUBLIC_DIR / "index.html").write_text(
+        html_document,
+        encoding="utf-8",
+    )
 
 
 def main():
@@ -661,19 +679,12 @@ def main():
     write_json("weeek_tasks.json", tasks)
 
     write_csv(tasks, projects_by_id)
-
-    page = html_page(tasks, projects)
-
-    (
-        PUBLIC_DIR / "index.html"
-    ).write_text(
-        page,
-        encoding="utf-8",
-    )
+    make_html(tasks, projects)
 
     task_213 = next(
         (
-            task for task in tasks
+            task
+            for task in tasks
             if str(task_id(task)) == "213"
         ),
         None,
@@ -686,7 +697,7 @@ def main():
         "Выполнено: "
         + str(
             sum(
-                is_completed(task)
+                task_is_completed(task)
                 for task in tasks
             )
         )
@@ -695,8 +706,8 @@ def main():
     if task_213 is not None:
         print(
             "Задача 213: "
-            f"status={status_name(task_213)!r}, "
-            f"isCompleted={is_completed(task_213)}"
+            f"status={task_status(task_213)!r}, "
+            f"isCompleted={task_is_completed(task_213)}"
         )
 
 
