@@ -1,320 +1,47 @@
-name: Обновление и деплой панели Weeek
+name: Диагностика Weeek
 
 on:
   workflow_dispatch:
 
-  schedule:
-    - cron: "0 1 * * *"
-
 permissions:
-  contents: write
-
-concurrency:
-  group: weeek-report-deploy
-  cancel-in-progress: false
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  contents: read
 
 jobs:
-  update-and-deploy:
-    name: Получение всех задач и деплой
+  probe-weeek:
+    name: Проверка пагинации Weeek
     runs-on: ubuntu-24.04
 
     steps:
       - name: Скачать репозиторий
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: true
 
       - name: Установить Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - name: Установить зависимости
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install requests
+      - name: Установить requests
+        run: python -m pip install requests
 
-      - name: Проверить секреты
-        shell: bash
+      - name: Проверить WEEEK_TOKEN
         env:
           WEEEK_TOKEN: ${{ secrets.WEEEK_TOKEN }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          missing=0
-
           if [ -z "$WEEEK_TOKEN" ]; then
-            echo "::error::Не найден секрет WEEEK_TOKEN"
-            missing=1
-          else
-            echo "WEEEK_TOKEN: задан"
-          fi
-
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "::error::Не найден секрет CLOUDFLARE_API_TOKEN"
-            missing=1
-          else
-            echo "CLOUDFLARE_API_TOKEN: задан"
-          fi
-
-          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::error::Не найден секрет CLOUDFLARE_ACCOUNT_ID"
-            missing=1
-          else
-            echo "CLOUDFLARE_ACCOUNT_ID: задан"
-          fi
-
-          if [ "$missing" -ne 0 ]; then
-            echo "::error::Один или несколько секретов отсутствуют"
+            echo "::error::Не найден WEEEK_TOKEN"
             exit 1
           fi
 
-      - name: Проверить синтаксис Python
-        shell: bash
-        run: |
-          set +e
-          python -m py_compile weeek_report.py
-          code=$?
-          set -e
-
-          if [ "$code" -ne 0 ]; then
-            echo "::error::Файл weeek_report.py содержит синтаксическую ошибку"
-            exit "$code"
-          fi
-
-          echo "Синтаксис Python корректен"
-
-      - name: Создать панель Weeek
-        shell: bash
+      - name: Выполнить диагностику API
         env:
           WEEEK_TOKEN: ${{ secrets.WEEEK_TOKEN }}
         run: |
-          set +e
-          python -u weeek_report.py 2>&1 | tee weeek_report.log
-          code=${PIPESTATUS[0]}
-          set -e
+          python weeek_api_probe.py
 
-          echo ""
-          echo "===== Последние строки лога weeek_report.py ====="
-          tail -n 100 weeek_report.log || true
-          echo "================================================="
-
-          if [ "$code" -ne 0 ]; then
-            echo "::error::weeek_report.py завершился с кодом $code"
-            exit "$code"
-          fi
-
-      - name: Загрузить лог генерации
+      - name: Сохранить результат диагностики
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: weeek-report-log
-          path: weeek_report.log
-          if-no-files-found: ignore
-
-      - name: Проверить созданные файлы
-        shell: bash
-        run: |
-          failed=0
-
-          for file in \
-            public/index.html \
-            public/weeek_tasks.json \
-            public/weeek_projects.json \
-            public/weeek_tasks.csv
-          do
-            if [ ! -s "$file" ]; then
-              echo "::error::Файл отсутствует или пустой: $file"
-              failed=1
-            else
-              echo "Файл создан: $file"
-              wc -c "$file"
-            fi
-          done
-
-          if [ "$failed" -ne 0 ]; then
-            echo "::error::Не все выходные файлы созданы"
-            exit 1
-          fi
-
-      - name: Проверить данные Weeek
-        shell: bash
-        run: |
-          python - <<'PY'
-          import json
-          import sys
-          from pathlib import Path
-
-          tasks = json.loads(
-              Path("public/weeek_tasks.json")
-              .read_text(encoding="utf-8")
-          )
-
-          projects = json.loads(
-              Path("public/weeek_projects.json")
-              .read_text(encoding="utf-8")
-          )
-
-          print(f"Получено задач: {len(tasks)}")
-          print(f"Получено проектов: {len(projects)}")
-
-          if len(tasks) < 27:
-              print(
-                  f"::error::Получено только {len(tasks)} задач; "
-                  "ожидалось минимум 27"
-              )
-              sys.exit(1)
-
-          task_213 = next(
-              (
-                  task for task in tasks
-                  if str(task.get("id")) == "213"
-              ),
-              None,
-          )
-
-          if task_213 is None:
-              print("::error::Задача 213 не найдена")
-              sys.exit(1)
-
-          print(f"Задача 213: {task_213}")
-
-          if task_213.get("status") != "Выполнено":
-              print(
-                  "::error::У задачи 213 неверный status: "
-                  + repr(task_213.get("status"))
-              )
-              sys.exit(1)
-
-          if task_213.get("isCompleted") is not True:
-              print(
-                  "::error::У задачи 213 isCompleted не равен true"
-              )
-              sys.exit(1)
-
-          project_ids = {
-              str(task.get("projectId"))
-              for task in tasks
-              if task.get("projectId") is not None
-          }
-
-          print(f"Project IDs: {sorted(project_ids)}")
-
-          if "2" not in project_ids:
-              print("::error::Не найден projectId=2")
-              sys.exit(1)
-
-          if "4" not in project_ids:
-              print("::error::Не найден projectId=4")
-              sys.exit(1)
-
-          completed = sum(
-              task.get("isCompleted") is True
-              for task in tasks
-          )
-
-          print(f"Выполнено: {completed}")
-          print("Проверка данных пройдена")
-          PY
-
-      - name: Сохранить результаты в GitHub
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add public/index.html
-          git add public/weeek_tasks.json
-          git add public/weeek_projects.json
-          git add public/weeek_tasks.csv
-
-          if git diff --cached --quiet; then
-            echo "Изменений для коммита нет"
-          else
-            git commit -m "Обновление панели Weeek"
-            git push origin HEAD:main
-          fi
-
-      - name: Установить Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-
-      - name: Установить Wrangler
-        shell: bash
-        run: |
-          npm install --global wrangler@4
-          wrangler --version
-
-      - name: Проверить конфигурацию Cloudflare
-        shell: bash
-        run: |
-          if [ ! -s worker.js ]; then
-            echo "::error::Не найден worker.js"
-            exit 1
-          fi
-
-          if [ ! -s wrangler.jsonc ]; then
-            echo "::error::Не найден wrangler.jsonc"
-            exit 1
-          fi
-
-          if [ ! -s public/index.html ]; then
-            echo "::error::Не найден public/index.html"
-            exit 1
-          fi
-
-          echo "wrangler.jsonc:"
-          cat wrangler.jsonc
-
-      - name: Проверить доступ Cloudflare
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set +e
-          wrangler whoami 2>&1 | tee cloudflare-whoami.log
-          code=${PIPESTATUS[0]}
-          set -e
-
-          cat cloudflare-whoami.log
-
-          if [ "$code" -ne 0 ]; then
-            echo "::error::Проверка доступа Cloudflare завершилась с кодом $code"
-            exit "$code"
-          fi
-
-      - name: Деплой в Cloudflare Workers
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set +e
-          wrangler deploy --config wrangler.jsonc 2>&1 | tee wrangler-deploy.log
-          code=${PIPESTATUS[0]}
-          set -e
-
-          cat wrangler-deploy.log
-
-          if [ "$code" -ne 0 ]; then
-            echo "::error::Деплой Cloudflare завершился с кодом $code"
-            exit "$code"
-          fi
-
-      - name: Загрузить логи деплоя
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cloudflare-deploy-logs
-          path: |
-            weeek_report.log
-            cloudflare-whoami.log
-            wrangler-deploy.log
+          name: weeek-api-probe
+          path: weeek_api_probe.json
           if-no-files-found: ignore
