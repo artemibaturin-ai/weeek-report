@@ -5,7 +5,6 @@ import os
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlencode
 
 import requests
 
@@ -37,91 +36,52 @@ def api_get(path, params=None):
     )
 
     response.raise_for_status()
-    payload = response.json()
-
-    if isinstance(payload, dict):
-        if isinstance(payload.get("data"), dict):
-            return payload["data"]
-
-        return payload
-
-    return payload
+    return response.json()
 
 
-def extract_items(payload, names):
+def extract_items(payload):
     if isinstance(payload, list):
         return payload
 
     if not isinstance(payload, dict):
         return []
 
-    for name in names:
-        value = payload.get(name)
+    for key in ("tasks", "projects", "items", "results", "data"):
+        value = payload.get(key)
 
         if isinstance(value, list):
             return value
 
-    data = payload.get("data")
+        if isinstance(value, dict):
+            for nested_key in ("tasks", "projects", "items", "results"):
+                nested_value = value.get(nested_key)
 
-    if isinstance(data, list):
-        return data
-
-    if isinstance(data, dict):
-        for name in names:
-            value = data.get(name)
-
-            if isinstance(value, list):
-                return value
+                if isinstance(nested_value, list):
+                    return nested_value
 
     return []
 
 
-def extract_has_more(payload, current_count, offset):
-    if not isinstance(payload, dict):
-        return current_count >= PER_PAGE
-
-    for key in ("hasMore", "has_more", "hasNext", "has_next"):
-        if key in payload:
-            return bool(payload[key])
-
-    pagination = payload.get("pagination")
-
-    if isinstance(pagination, dict):
-        for key in ("hasMore", "has_more", "hasNext", "has_next"):
-            if key in pagination:
-                return bool(pagination[key])
-
-        total = pagination.get("total")
-
-        if isinstance(total, int):
-            return offset + current_count < total
-
-    total = payload.get("total")
-
-    if isinstance(total, int):
-        return offset + current_count < total
-
-    return current_count >= PER_PAGE
-
-
-def get_all(path, item_names):
-    items = []
+def get_all(path):
+    result = []
     offset = 0
-    seen_ids = set()
+    known_ids = set()
 
     while True:
-        params = {
-            "offset": offset,
-            "per_page": PER_PAGE,
-        }
+        payload = api_get(
+            path,
+            {
+                "offset": offset,
+                "per_page": PER_PAGE,
+            },
+        )
 
-        payload = api_get(path, params)
-        page = extract_items(payload, item_names)
+        page = extract_items(payload)
 
         if not page:
             break
 
-        added = 0
+        new_items = 0
 
         for item in page:
             if not isinstance(item, dict):
@@ -130,77 +90,45 @@ def get_all(path, item_names):
             item_id = item.get("id")
 
             if item_id is not None:
-                marker = str(item_id)
+                item_key = str(item_id)
 
-                if marker in seen_ids:
+                if item_key in known_ids:
                     continue
 
-                seen_ids.add(marker)
+                known_ids.add(item_key)
 
-            items.append(item)
-            added += 1
+            result.append(item)
+            new_items += 1
 
-        if not extract_has_more(payload, len(page), offset):
-            break
-
-        if added == 0:
+        if len(page) < PER_PAGE or new_items == 0:
             break
 
         offset += len(page)
 
-        if len(page) < PER_PAGE:
-            break
-
-    return items
-
-
-def get_projects():
-    candidates = (
-        "/tm/projects",
-        "/projects",
-    )
-
-    last_error = None
-
-    for path in candidates:
-        try:
-            return get_all(
-                path,
-                ("projects", "items", "results"),
-            )
-        except requests.HTTPError as error:
-            last_error = error
-
-    if last_error:
-        raise last_error
-
-    return []
+    return result
 
 
 def get_tasks():
-    candidates = (
-        "/tm/tasks",
-        "/tasks",
-    )
-
-    last_error = None
-
-    for path in candidates:
+    for endpoint in ("/tm/tasks", "/tasks"):
         try:
-            return get_all(
-                path,
-                ("tasks", "items", "results"),
-            )
-        except requests.HTTPError as error:
-            last_error = error
+            return get_all(endpoint)
+        except requests.HTTPError:
+            continue
 
-    if last_error:
-        raise last_error
-
-    return []
+    raise RuntimeError("Не удалось получить задачи Weeek")
 
 
-def first_value(item, keys, default=""):
+def get_projects():
+    for endpoint in ("/tm/projects", "/projects"):
+        try:
+            return get_all(endpoint)
+        except requests.HTTPError:
+            continue
+
+    raise RuntimeError("Не удалось получить проекты Weeek")
+
+
+def value_from(item, keys, default=""):
     for key in keys:
         value = item.get(key)
 
@@ -210,10 +138,10 @@ def first_value(item, keys, default=""):
     return default
 
 
-def object_name(value, default=""):
+def text_value(value, default=""):
     if isinstance(value, dict):
         return str(
-            first_value(
+            value_from(
                 value,
                 ("name", "title", "label", "text", "id"),
                 default,
@@ -226,100 +154,116 @@ def object_name(value, default=""):
     return str(value)
 
 
-def get_task_project_id(task):
-    project = task.get("project")
-
-    if isinstance(project, dict):
-        return first_value(project, ("id", "projectId"))
-
-    value = first_value(
-        task,
-        ("projectId", "project_id"),
-        None,
+def task_title(task):
+    return text_value(
+        value_from(task, ("title", "name", "text"), "Без названия")
     )
 
-    if value is not None:
-        return value
 
-    return None
-
-
-def get_task_project_name(task, projects_by_id):
+def task_project_id(task):
     project = task.get("project")
 
     if isinstance(project, dict):
-        name = first_value(
-            project,
-            ("name", "title", "label"),
-            "",
-        )
+        return value_from(project, ("id", "projectId"), "")
+
+    return value_from(task, ("projectId", "project_id"), "")
+
+
+def task_project_name(task, projects_by_id):
+    project = task.get("project")
+
+    if isinstance(project, dict):
+        name = value_from(project, ("name", "title", "label"), "")
 
         if name:
             return str(name)
 
-    project_id = get_task_project_id(task)
+    project_id = task_project_id(task)
 
-    if project_id is not None:
-        project_data = projects_by_id.get(str(project_id))
+    if project_id != "":
+        project = projects_by_id.get(str(project_id))
 
-        if project_data:
-            return object_name(project_data, "Без проекта")
+        if project:
+            return text_value(project, "Без проекта")
 
     return "Без проекта"
 
 
-def get_status_name(task):
-    status = first_value(
-        task,
-        ("status", "state", "column"),
-        "",
+def task_status(task):
+    return text_value(
+        value_from(task, ("status", "state", "column"), "Не указан"),
+        "Не указан",
     )
 
-    return object_name(status, "Не указан")
 
-
-def get_status_id(task):
-    status = first_value(
-        task,
-        ("status", "state", "column"),
-        None,
-    )
+def task_status_id(task):
+    status = task.get("status")
 
     if isinstance(status, dict):
-        return first_value(status, ("id", "statusId"), "")
+        return value_from(status, ("id", "statusId"), "")
 
-    return first_value(
+    return value_from(
         task,
         ("statusId", "status_id", "stateId", "columnId"),
-        status or "",
-    )
-
-
-def get_title(task):
-    return str(
-        first_value(
-            task,
-            ("title", "name", "text"),
-            "Без названия",
-        )
-    )
-
-
-def get_due_date(task):
-    return first_value(
-        task,
-        (
-            "dueDate",
-            "due_date",
-            "deadline",
-            "date",
-        ),
         "",
     )
 
 
-def get_assignees(task):
-    values = first_value(
+def task_is_completed(task):
+    value = value_from(
+        task,
+        ("isCompleted", "is_completed", "completed"),
+        False,
+    )
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, int):
+        return value == 1
+
+    return str(value).lower() in {
+        "true",
+        "1",
+        "yes",
+        "да",
+    }
+
+
+def task_due_date(task):
+    return value_from(
+        task,
+        ("dueDate", "due_date", "deadline", "date"),
+        "",
+    )
+
+
+def task_overdue(task):
+    value = value_from(
+        task,
+        ("overdue", "overdueDays", "overdue_days"),
+        0,
+    )
+
+    try:
+        return int(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def task_is_not_started(task):
+    return not task_is_completed(task) and not task_overdue(task)
+
+
+def task_priority(task):
+    return text_value(
+        value_from(task, ("priority", "priorityId"), ""),
+        "",
+    )
+
+
+def task_assignees(task):
+    values = value_from(
         task,
         ("assignees", "members", "users", "responsible"),
         [],
@@ -328,98 +272,49 @@ def get_assignees(task):
     if not isinstance(values, list):
         values = [values] if values else []
 
-    result = []
-
-    for value in values:
-        result.append(object_name(value, str(value)))
-
-    return ", ".join(result)
+    return ", ".join(text_value(value, str(value)) for value in values)
 
 
-def get_priority(task):
-    priority = first_value(
-        task,
-        ("priority", "priorityId"),
-        "",
-    )
-
-    return object_name(priority, "")
-
-
-def get_description(task):
-    return first_value(
+def task_description(task):
+    return value_from(
         task,
         ("description", "content", "details"),
         "",
     )
 
 
-def is_completed(task):
-    value = task.get("completed")
-
-    if isinstance(value, bool):
-        return value
-
-    status = get_status_name(task).lower()
-
-    return status in {
-        "done",
-        "completed",
-        "complete",
-        "finished",
-        "выполнено",
-        "завершено",
-    }
-
-
-def is_overdue(task):
-    due_date = get_due_date(task)
-
-    if not due_date or is_completed(task):
-        return False
-
-    text = str(due_date)[:10]
-
-    for pattern in ("%Y-%m-%d", "%d.%m.%Y"):
-        try:
-            parsed = datetime.strptime(text, pattern).date()
-            return parsed < datetime.now().date()
-        except ValueError:
-            continue
-
-    return False
-
-
 def safe(value):
     return html.escape(str(value or ""), quote=True)
 
 
-def write_json(filename, value):
-    path = PUBLIC_DIR / filename
-
-    with path.open("w", encoding="utf-8") as file:
-        json.dump(value, file, ensure_ascii=False, indent=2)
+def write_json(filename, data):
+    with (PUBLIC_DIR / filename).open("w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=2)
 
 
 def write_csv(tasks, projects_by_id):
-    path = PUBLIC_DIR / "weeek_tasks.csv"
-
     fields = [
         "id",
-        "title",
         "project_id",
         "project",
+        "title",
         "status_id",
         "status",
+        "is_completed",
+        "overdue",
         "due_date",
         "priority",
         "assignees",
-        "completed",
-        "overdue",
         "description",
+        "created_at",
+        "completed_at",
     ]
 
-    with path.open("w", encoding="utf-8-sig", newline="") as file:
+    with (PUBLIC_DIR / "weeek_tasks.csv").open(
+        "w",
+        encoding="utf-8-sig",
+        newline="",
+    ) as file:
         writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()
 
@@ -427,99 +322,77 @@ def write_csv(tasks, projects_by_id):
             writer.writerow(
                 {
                     "id": task.get("id", ""),
-                    "title": get_title(task),
-                    "project_id": get_task_project_id(task) or "",
-                    "project": get_task_project_name(
-                        task,
-                        projects_by_id,
+                    "project_id": task_project_id(task),
+                    "project": task_project_name(task, projects_by_id),
+                    "title": task_title(task),
+                    "status_id": task_status_id(task),
+                    "status": task_status(task),
+                    "is_completed": (
+                        "Да" if task_is_completed(task) else "Нет"
                     ),
-                    "status_id": get_status_id(task),
-                    "status": get_status_name(task),
-                    "due_date": get_due_date(task),
-                    "priority": get_priority(task),
-                    "assignees": get_assignees(task),
-                    "completed": "Да" if is_completed(task) else "Нет",
-                    "overdue": "Да" if is_overdue(task) else "Нет",
-                    "description": get_description(task),
+                    "overdue": (
+                        "Да" if task_overdue(task) else "Нет"
+                    ),
+                    "due_date": task_due_date(task),
+                    "priority": task_priority(task),
+                    "assignees": task_assignees(task),
+                    "description": task_description(task),
+                    "created_at": value_from(
+                        task,
+                        ("createdAt", "created_at"),
+                        "",
+                    ),
+                    "completed_at": value_from(
+                        task,
+                        ("completedAt", "completed_at"),
+                        "",
+                    ),
                 }
             )
-
-
-def make_project_cards(projects):
-    cards = []
-
-    for project in projects:
-        project_id = project.get("id", "")
-        project_name = object_name(project, "Без названия")
-        project_status = object_name(
-            first_value(project, ("status", "state"), ""),
-            "",
-        )
-
-        cards.append(
-            "<article class=\"project-card\">"
-            f"<h3>{safe(project_name)}</h3>"
-            f"<div>ID: {safe(project_id)}</div>"
-            f"<div>Статус: {safe(project_status or 'Не указан')}</div>"
-            "</article>"
-        )
-
-    return "".join(cards)
-
-
-def make_status_rows(status_groups):
-    rows = []
-
-    for status, status_tasks in sorted(
-        status_groups.items(),
-        key=lambda pair: pair[0].lower(),
-    ):
-        rows.append(
-            "<tr>"
-            f"<td>{safe(status)}</td>"
-            f"<td>{len(status_tasks)}</td>"
-            "</tr>"
-        )
-
-    return "".join(rows)
-
-
-def make_project_rows(project_groups):
-    rows = []
-
-    for project, project_tasks in sorted(
-        project_groups.items(),
-        key=lambda pair: pair[0].lower(),
-    ):
-        rows.append(
-            "<tr>"
-            f"<td>{safe(project)}</td>"
-            f"<td>{len(project_tasks)}</td>"
-            "</tr>"
-        )
-
-    return "".join(rows)
 
 
 def make_task_rows(tasks, projects_by_id):
     rows = []
 
     for task in tasks:
-        project_name = get_task_project_name(task, projects_by_id)
-        status_name = get_status_name(task)
-        title = get_title(task)
-        due_date = get_due_date(task)
-        priority = get_priority(task)
-        assignees = get_assignees(task)
+        rows.append(
+            "<tr>"
+            f"<td>{safe(task.get('id', ''))}</td>"
+            f"<td>{safe(task_project_name(task, projects_by_id))}</td>"
+            f"<td>{safe(task_title(task))}</td>"
+            f"<td>{safe(task_status(task))}</td>"
+            f"<td>{safe(task_due_date(task))}</td>"
+            "</tr>"
+        )
+
+    return "".join(rows)
+
+
+def make_summary_rows(counter, total):
+    rows = []
+
+    for name, count in counter.most_common():
+        percent = (count / total * 100) if total else 0
 
         rows.append(
             "<tr>"
-            f"<td>{safe(title)}</td>"
-            f"<td>{safe(project_name)}</td>"
-            f"<td>{safe(status_name)}</td>"
-            f"<td>{safe(due_date)}</td>"
-            f"<td>{safe(priority)}</td>"
-            f"<td>{safe(assignees)}</td>"
+            f"<td>{safe(name)}</td>"
+            f"<td>{count}</td>"
+            f"<td>{percent:.1f}%</td>"
+            "</tr>"
+        )
+
+    return "".join(rows)
+
+
+def make_project_rows(counter):
+    rows = []
+
+    for name, count in counter.most_common():
+        rows.append(
+            "<tr>"
+            f"<td>{safe(name)}</td>"
+            f"<td>{count}</td>"
             "</tr>"
         )
 
@@ -533,35 +406,28 @@ def make_html(tasks, projects):
         if project.get("id") is not None
     }
 
-    status_groups = defaultdict(list)
-    project_groups = defaultdict(list)
+    completed_count = sum(task_is_completed(task) for task in tasks)
+    overdue_count = sum(
+        task_overdue(task) and not task_is_completed(task)
+        for task in tasks
+    )
+    not_started_count = sum(
+        task_is_not_started(task)
+        for task in tasks
+    )
 
-    for task in tasks:
-        status_groups[get_status_name(task)].append(task)
+    status_counter = Counter(task_status(task) for task in tasks)
 
-        project_groups[
-            get_task_project_name(task, projects_by_id)
-        ].append(task)
+    project_counter = Counter(
+        task_project_name(task, projects_by_id)
+        for task in tasks
+    )
 
-    completed = sum(is_completed(task) for task in tasks)
-    overdue = sum(is_overdue(task) for task in tasks)
-    not_started = len(tasks) - completed
-    updated_at = datetime.now().strftime("%d.%m.%Y %H:%M")
-
-    project_cards = make_project_cards(projects)
-    status_rows = make_status_rows(status_groups)
-    project_rows = make_project_rows(project_groups)
     task_rows = make_task_rows(tasks, projects_by_id)
+    status_rows = make_summary_rows(status_counter, len(tasks))
+    project_rows = make_project_rows(project_counter)
 
-    if not project_cards:
-        project_cards = (
-            '<div class="empty">Проекты не найдены в API</div>'
-        )
-
-    if not task_rows:
-        task_rows = (
-            '<tr><td colspan="6">Задачи не найдены</td></tr>'
-        )
+    updated_at = datetime.now().strftime("%d.%m.%Y %H:%M")
 
     html_document = f"""<!doctype html>
 <html lang="ru">
@@ -579,8 +445,8 @@ def make_html(tasks, projects):
 
     body {{
       margin: 0;
-      background: #f4f6f8;
       color: #202124;
+      background: #f4f6f8;
       font-family: Arial, sans-serif;
     }}
 
@@ -595,7 +461,7 @@ def make_html(tasks, projects):
     }}
 
     h2 {{
-      margin-top: 32px;
+      margin-top: 30px;
     }}
 
     .updated {{
@@ -609,11 +475,9 @@ def make_html(tasks, projects):
       gap: 12px;
     }}
 
-    .card,
-    .project-card,
-    .panel {{
+    .card {{
       padding: 18px;
-      background: white;
+      background: #fff;
       border-radius: 12px;
       box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
     }}
@@ -629,20 +493,12 @@ def make_html(tasks, projects):
       color: #5f6368;
     }}
 
-    .projects {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 12px;
-    }}
-
-    .project-card h3 {{
-      margin-top: 0;
-    }}
-
-    .grid {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 18px;
+    .panel {{
+      margin-top: 18px;
+      padding: 18px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
     }}
 
     .table-wrapper {{
@@ -651,7 +507,7 @@ def make_html(tasks, projects):
 
     table {{
       width: 100%;
-      min-width: 600px;
+      min-width: 650px;
       border-collapse: collapse;
     }}
 
@@ -665,11 +521,6 @@ def make_html(tasks, projects):
 
     th {{
       background: #eef1f4;
-    }}
-
-    .empty {{
-      padding: 18px;
-      color: #5f6368;
     }}
   </style>
 </head>
@@ -692,61 +543,55 @@ def make_html(tasks, projects):
       </div>
 
       <div class="card">
-        <span class="number">{completed}</span>
+        <span class="number">{completed_count}</span>
         <span class="label">Выполнено</span>
       </div>
 
       <div class="card">
-        <span class="number">{overdue}</span>
+        <span class="number">{overdue_count}</span>
         <span class="label">Просрочено</span>
       </div>
 
       <div class="card">
-        <span class="number">{not_started}</span>
-        <span class="label">Не завершено</span>
+        <span class="number">{not_started_count}</span>
+        <span class="label">Не начато</span>
       </div>
     </section>
 
-    <h2>Все проекты</h2>
-    <section class="projects">
-      {project_cards}
+    <section class="panel">
+      <h2>Задачи по статусам</h2>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Статус</th>
+              <th>Количество</th>
+              <th>Процент</th>
+            </tr>
+          </thead>
+          <tbody>
+            {status_rows}
+          </tbody>
+        </table>
+      </div>
     </section>
 
-    <div class="grid">
-      <section class="panel">
-        <h2>Задачи по статусам</h2>
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Статус</th>
-                <th>Количество</th>
-              </tr>
-            </thead>
-            <tbody>
-              {status_rows}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>Задачи по проектам</h2>
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Проект</th>
-                <th>Количество</th>
-              </tr>
-            </thead>
-            <tbody>
-              {project_rows}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
+    <section class="panel">
+      <h2>Задачи по проектам</h2>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Проект</th>
+              <th>Количество задач</th>
+            </tr>
+          </thead>
+          <tbody>
+            {project_rows}
+          </tbody>
+        </table>
+      </div>
+    </section>
 
     <section class="panel">
       <h2>Все задачи</h2>
@@ -754,12 +599,11 @@ def make_html(tasks, projects):
         <table>
           <thead>
             <tr>
-              <th>Название</th>
+              <th>ID</th>
               <th>Проект</th>
+              <th>Задача</th>
               <th>Статус</th>
               <th>Срок</th>
-              <th>Приоритет</th>
-              <th>Исполнители</th>
             </tr>
           </thead>
           <tbody>
@@ -773,9 +617,10 @@ def make_html(tasks, projects):
 </html>
 """
 
-    path = PUBLIC_DIR / "index.html"
-
-    with path.open("w", encoding="utf-8") as file:
+    with (PUBLIC_DIR / "index.html").open(
+        "w",
+        encoding="utf-8",
+    ) as file:
         file.write(html_document)
 
 
@@ -794,9 +639,17 @@ def main():
     write_csv(tasks, projects_by_id)
     make_html(tasks, projects)
 
-    print(f"Получено проектов: {len(projects)}")
     print(f"Получено задач: {len(tasks)}")
-    print(f"Создан файл: {PUBLIC_DIR / 'index.html'}")
+    print(f"Выполнено: {sum(task_is_completed(task) for task in tasks)}")
+    print(
+        "Просрочено: "
+        + str(
+            sum(
+                task_overdue(task) and not task_is_completed(task)
+                for task in tasks
+            )
+        )
+    )
 
 
 if __name__ == "__main__":
