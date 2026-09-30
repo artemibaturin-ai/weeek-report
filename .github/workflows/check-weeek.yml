@@ -9,57 +9,163 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: weeek-report-deploy
+  cancel-in-progress: false
+
 jobs:
   update-and-deploy:
+    name: Создание и деплой панели
     runs-on: ubuntu-24.04
 
     steps:
       - name: Скачать репозиторий
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Установить Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Установить зависимости
+        shell: bash
         run: |
           python -m pip install --upgrade pip
+
           if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
+            python -m pip install -r requirements.txt
           else
-            pip install requests
+            python -m pip install requests
           fi
 
-      - name: Создать панель Weeek
+      - name: Проверить секреты
+        shell: bash
         env:
           WEEEK_TOKEN: ${{ secrets.WEEEK_TOKEN }}
-        run: python -u weeek_report.py
-
-      - name: Проверить результат
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          test -s public/index.html
-          test -s public/weeek_tasks.csv
-          test -s public/weeek_tasks.json
-          ls -lh public
+          test -n "$WEEEK_TOKEN" || {
+            echo "::error::Не найден секрет WEEEK_TOKEN"
+            exit 1
+          }
+
+          test -n "$CLOUDFLARE_API_TOKEN" || {
+            echo "::error::Не найден секрет CLOUDFLARE_API_TOKEN"
+            exit 1
+          }
+
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || {
+            echo "::error::Не найден секрет CLOUDFLARE_ACCOUNT_ID"
+            exit 1
+          }
+
+          echo "WEEEK_TOKEN: задан"
+          echo "CLOUDFLARE_API_TOKEN: задан"
+          echo "CLOUDFLARE_ACCOUNT_ID: задан"
+
+      - name: Проверить синтаксис Python до запуска
+        shell: bash
+        run: |
+          python -m py_compile weeek_report.py
+
+      - name: Создать папку public
+        shell: bash
+        run: |
+          mkdir -p public
+
+      - name: Создать панель Weeek
+        shell: bash
+        env:
+          WEEEK_TOKEN: ${{ secrets.WEEEK_TOKEN }}
+        run: |
+          python -u weeek_report.py
+
+      - name: Проверить созданные файлы
+        shell: bash
+        run: |
+          test -s public/index.html || {
+            echo "::error::Не создан public/index.html"
+            exit 1
+          }
+
+          test -s public/weeek_tasks.csv || {
+            echo "::error::Не создан public/weeek_tasks.csv"
+            exit 1
+          }
+
+          test -s public/weeek_tasks.json || {
+            echo "::error::Не создан public/weeek_tasks.json"
+            exit 1
+          }
+
+          echo "Созданные файлы:"
+          ls -lah public
+
+      - name: Проверить конфигурацию Cloudflare
+        shell: bash
+        run: |
+          test -s worker.js || {
+            echo "::error::Не найден worker.js в корне репозитория"
+            exit 1
+          }
+
+          test -s wrangler.jsonc || {
+            echo "::error::Не найден wrangler.jsonc в корне репозитория"
+            exit 1
+          }
+
+          echo "Файл worker.js найден"
+          echo "Файл wrangler.jsonc найден"
+          echo "Конфигурация:"
+          cat wrangler.jsonc
 
       - name: Сохранить результат в GitHub
+        shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add public/index.html public/weeek_tasks.csv public/weeek_tasks.json
+          git add public/index.html
+          git add public/weeek_tasks.csv
+          git add public/weeek_tasks.json
 
           if git diff --cached --quiet; then
-            echo "Изменений нет"
+            echo "Изменений для коммита нет"
           else
             git commit -m "Обновление панели Weeek"
-            git push
+            git push origin HEAD:main
           fi
 
-      - name: Деплой в Cloudflare Workers
-        uses: cloudflare/wrangler-action@v3
+      - name: Установить Node.js
+        uses: actions/setup-node@v6
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Подготовить Wrangler
+        shell: bash
+        run: |
+          npm install --global wrangler@4
+          wrangler --version
+
+      - name: Проверить доступ Cloudflare
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          wrangler whoami
+
+      - name: Деплой в Cloudflare Workers
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          wrangler deploy --config wrangler.jsonc
