@@ -1,13 +1,16 @@
-name: Проверка пагинации Weeek
+name: Обновление и деплой панели Weeek
 
 on:
   workflow_dispatch:
 
+  schedule:
+    - cron: "0 1 * * *"
+
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  test:
+  update-and-deploy:
     runs-on: ubuntu-24.04
 
     steps:
@@ -19,13 +22,44 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Запустить диагностику
+      - name: Установить зависимости
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install requests
+          fi
+
+      - name: Создать панель Weeek
         env:
           WEEEK_TOKEN: ${{ secrets.WEEEK_TOKEN }}
         run: python -u weeek_report.py
 
-      - name: Сохранить результаты
-        uses: actions/upload-artifact@v4
+      - name: Проверить результат
+        run: |
+          test -s public/index.html
+          test -s public/weeek_tasks.csv
+          test -s public/weeek_tasks.json
+          ls -lh public
+
+      - name: Сохранить результат в GitHub
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add public/index.html public/weeek_tasks.csv public/weeek_tasks.json
+
+          if git diff --cached --quiet; then
+            echo "Изменений нет"
+          else
+            git commit -m "Обновление панели Weeek"
+            git push
+          fi
+
+      - name: Деплой в Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
         with:
-          name: weeek-pagination-tests
-          path: weeek_pagination_tests.json
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
