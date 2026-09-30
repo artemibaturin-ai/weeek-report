@@ -39,24 +39,24 @@ def request_json(path, params=None):
     return response.json()
 
 
-def find_list(value, preferred_keys):
+def find_list(value, keys):
     if isinstance(value, list):
         return value
 
     if not isinstance(value, dict):
         return []
 
-    for key in preferred_keys:
+    for key in keys:
         candidate = value.get(key)
 
         if isinstance(candidate, list):
             return candidate
 
-    for key in preferred_keys:
+    for key in keys:
         candidate = value.get(key)
 
         if isinstance(candidate, dict):
-            result = find_list(candidate, preferred_keys)
+            result = find_list(candidate, keys)
 
             if result:
                 return result
@@ -64,32 +64,20 @@ def find_list(value, preferred_keys):
     return []
 
 
-def get_page(path, page_number):
-    parameter_sets = (
-        {
-            "page": page_number,
-            "limit": PAGE_SIZE,
-        },
-        {
-            "page": page_number,
-            "per_page": PAGE_SIZE,
-        },
-        {
-            "offset": (page_number - 1) * PAGE_SIZE,
-            "limit": PAGE_SIZE,
-        },
-        {
-            "offset": (page_number - 1) * PAGE_SIZE,
-            "per_page": PAGE_SIZE,
-        },
-    )
+def load_collection(path):
+    records = []
+    seen_ids = set()
 
-    last_payload = None
+    for page_number in range(1, MAX_PAGES + 1):
+        payload = request_json(
+            path,
+            {
+                "page": page_number,
+                "limit": PAGE_SIZE,
+            },
+        )
 
-    for params in parameter_sets:
-        payload = request_json(path, params)
-        last_payload = payload
-        items = find_list(
+        page_records = find_list(
             payload,
             (
                 "tasks",
@@ -99,19 +87,6 @@ def get_page(path, page_number):
                 "data",
             ),
         )
-
-        if items:
-            return payload, items
-
-    return last_payload, []
-
-
-def load_collection(path):
-    records = []
-    seen_ids = set()
-
-    for page_number in range(1, MAX_PAGES + 1):
-        payload, page_records = get_page(path, page_number)
 
         if not page_records:
             break
@@ -125,20 +100,17 @@ def load_collection(path):
             record_id = record.get("id")
 
             if record_id is not None:
-                record_key = str(record_id)
+                key = str(record_id)
 
-                if record_key in seen_ids:
+                if key in seen_ids:
                     continue
 
-                seen_ids.add(record_key)
+                seen_ids.add(key)
 
             records.append(record)
             added += 1
 
-        if added == 0:
-            break
-
-        if len(page_records) < PAGE_SIZE:
+        if added == 0 or len(page_records) < PAGE_SIZE:
             break
 
     return records
@@ -448,7 +420,7 @@ def nested_task_records(task):
                     "items",
                     "results",
                     "data",
-                )
+                ),
             )
 
             result.extend(
@@ -639,77 +611,218 @@ def make_html(tasks, projects):
         )
 
     status_rows = "".join(
-        "<tr>"
-        f"<td>{safe(status)}</td>"
-        f"<td>{count}</td>"
-        "</tr>"
+        (
+            "<tr>"
+            f"<td>{safe(status)}</td>"
+            f"<td>{count}</td>"
+            "</tr>"
+        )
         for status, count in status_counts.most_common()
     )
 
     project_rows = "".join(
-        "<tr>"
-        f"<td>{safe(project)}</td>"
-        f"<td>{count}</td>"
-        "</tr>"
+        (
+            "<tr>"
+            f"<td>{safe(project)}</td>"
+            f"<td>{count}</td>"
+            "</tr>"
+        )
         for project, count in project_counts.most_common()
     )
+
+    task_rows_html = "".join(task_rows)
 
     updated_at = datetime.now().strftime(
         "%d.%m.%Y %H:%M"
     )
 
-    html_document = f"""<!doctype html>
-<html lang="ru">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
-  <title>Панель задач Weeek</title>
-  <style>
-    * {{
-      box-sizing: border-box;
-    }}
+    parts = [
+        "<!doctype html>",
+        '<html lang="ru">',
+        "<head>",
+        '<meta charset="utf-8">',
+        (
+            '<meta name="viewport" '
+            'content="width=device-width, initial-scale=1">'
+        ),
+        (
+            '<meta http-equiv="Cache-Control" '
+            'content="no-cache, no-store, must-revalidate">'
+        ),
+        (
+            '<meta http-equiv="Pragma" content="no-cache">'
+        ),
+        (
+            '<meta http-equiv="Expires" content="0">'
+        ),
+        "<title>Панель задач Weeek</title>",
+        "<style>",
+        "* { box-sizing: border-box; }",
+        (
+            "body { margin: 0; background: #f4f6f8; "
+            "color: #202124; font-family: Arial, sans-serif; }"
+        ),
+        (
+            "main { width: min(1400px, 100%); margin: 0 auto; "
+            "padding: 24px; }"
+        ),
+        ".updated { margin-bottom: 24px; color: #5f6368; }",
+        (
+            ".cards { display: grid; "
+            "grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); "
+            "gap: 12px; }"
+        ),
+        (
+            ".card, .panel { padding: 18px; background: white; "
+            "border-radius: 12px; "
+            "box-shadow: 0 2px 8px rgba(0, 0, 0, .08); }"
+        ),
+        (
+            ".number { display: block; margin-bottom: 6px; "
+            "font-size: 30px; font-weight: bold; }"
+        ),
+        ".label { color: #5f6368; }",
+        ".panel { margin-top: 20px; }",
+        ".table-wrapper { overflow-x: auto; }",
+        (
+            "table { width: 100%; min-width: 700px; "
+            "border-collapse: collapse; }"
+        ),
+        (
+            "th, td { padding: 11px; "
+            "border-bottom: 1px solid #e5e7eb; "
+            "text-align: left; vertical-align: top; }"
+        ),
+        "th { background: #eef1f4; }",
+        "</style>",
+        "</head>",
+        "<body>",
+        "<main>",
+        "<h1>Панель задач Weeek</h1>",
+        (
+            '<div class="updated">Данные обновлены: '
+            + safe(updated_at)
+            + "</div>"
+        ),
+        '<section class="cards">',
+        (
+            '<div class="card"><span class="number">'
+            + str(len(tasks))
+            + '</span><span class="label">'
+            "Всего задач и подзадач</span></div>"
+        ),
+        (
+            '<div class="card"><span class="number">'
+            + str(len(projects))
+            + '</span><span class="label">Проектов</span></div>'
+        ),
+        (
+            '<div class="card"><span class="number">'
+            + str(completed_count)
+            + '</span><span class="label">Выполнено</span></div>'
+        ),
+        (
+            '<div class="card"><span class="number">'
+            + str(overdue_count)
+            + '</span><span class="label">Просрочено</span></div>'
+        ),
+        (
+            '<div class="card"><span class="number">'
+            + str(not_started_count)
+            + '</span><span class="label">Не начато</span></div>"
+        ),
+        "</section>",
+        '<section class="panel">',
+        "<h2>Задачи по статусам</h2>",
+        "<table>",
+        "<thead><tr><th>Статус</th><th>Количество</th></tr></thead>",
+        "<tbody>",
+        status_rows,
+        "</tbody>",
+        "</table>",
+        "</section>",
+        '<section class="panel">',
+        "<h2>Задачи по проектам</h2>",
+        "<table>",
+        "<thead><tr><th>Проект</th><th>Количество</th></tr></thead>",
+        "<tbody>",
+        project_rows,
+        "</tbody>",
+        "</table>",
+        "</section>",
+        '<section class="panel">',
+        "<h2>Все задачи</h2>",
+        '<div class="table-wrapper">',
+        "<table>",
+        (
+            "<thead><tr><th>ID</th><th>Проект</th>"
+            "<th>Название</th><th>Статус</th><th>Срок</th></tr></thead>"
+        ),
+        "<tbody>",
+        task_rows_html,
+        "</tbody>",
+        "</table>",
+        "</div>",
+        "</section>",
+        "</main>",
+        "</body>",
+        "</html>",
+    ]
 
-    body {{
-      margin: 0;
-      background: #f4f6f8;
-      color: #202124;
-      font-family: Arial, sans-serif;
-    }}
+    with (PUBLIC_DIR / "index.html").open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        file.write("\n".join(parts))
 
-    main {{
-      width: min(1400px, 100%);
-      margin: 0 auto;
-      padding: 24px;
-    }}
 
-    .updated {{
-      margin-bottom: 24px;
-      color: #5f6368;
-    }}
+def main():
+    projects = load_projects()
+    raw_tasks = load_tasks()
+    tasks = flatten_nested_tasks(raw_tasks)
 
-    .cards {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 12px;
-    }}
+    projects_by_id = {
+        str(project.get("id")): project
+        for project in projects
+        if project.get("id") is not None
+    }
 
-    .card,
-    .panel {{
-      padding: 18px;
-      background: #ffffff;
-      border-radius: 12px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
-    }}
+    write_json("weeek_projects.json", projects)
+    write_json("weeek_raw_tasks.json", raw_tasks)
+    write_json("weeek_tasks.json", tasks)
 
-    .number {{
-      display: block;
-      margin-bottom: 6px;
-      font-size: 30px;
-      font-weight: bold;
-    }}
+    write_csv(tasks, projects_by_id)
+    make_html(tasks, projects)
 
-    .label {{
-      color:
+    task_213 = next(
+        (
+            task
+            for task in tasks
+            if str(task_id(task)) == "213"
+        ),
+        None,
+    )
+
+    print(f"Проектов получено: {len(projects)}")
+    print(f"Задач API получено: {len(raw_tasks)}")
+    print(f"Всего задач после обработки: {len(tasks)}")
+    print(
+        "Выполнено: "
+        + str(
+            sum(
+                task_is_completed(task)
+                for task in tasks
+            )
+        )
+    )
+
+    if task_213:
+        print(
+            "Задача 213: "
+            f"status={task_status(task_213)!r}, "
+            f"isCompleted={task_is_completed(task_213)}"
+        )
+
+
+if __name__ == "__main__":
+    main()
