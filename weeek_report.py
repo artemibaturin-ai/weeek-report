@@ -3,7 +3,6 @@ import html
 import json
 import os
 from collections import Counter
-from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -284,31 +283,6 @@ def task_status(task):
     return text(fallback, "Не указан")
 
 
-def task_status_id(task):
-    status = task.get("status")
-
-    if isinstance(status, dict):
-        return first(
-            status,
-            (
-                "id",
-                "statusId",
-            ),
-            "",
-        )
-
-    return first(
-        task,
-        (
-            "statusId",
-            "status_id",
-            "stateId",
-            "columnId",
-        ),
-        "",
-    )
-
-
 def task_is_completed(task):
     value = first(
         task,
@@ -419,3 +393,229 @@ def nested_tasks(task):
             )
 
         elif isinstance(value, dict):
+            nested = find_records(
+                value,
+                (
+                    "subtasks",
+                    "tasks",
+                    "items",
+                    "results",
+                    "data",
+                ),
+            )
+
+            result.extend(
+                item
+                for item in nested
+                if isinstance(item, dict)
+            )
+
+    return result
+
+
+def flatten_tasks(tasks):
+    result = []
+    seen_ids = set()
+
+    def add_task(task, parent=None):
+        current = dict(task)
+
+        if parent is not None:
+            if not task_parent_id(current):
+                current["parentId"] = task_id(parent)
+
+            if not task_project_id(current):
+                current["projectId"] = task_project_id(parent)
+
+            if not current.get("project"):
+                current["project"] = parent.get("project", "")
+
+        current_id = task_id(current)
+
+        if current_id != "":
+            current_key = str(current_id)
+
+            if current_key in seen_ids:
+                return
+
+            seen_ids.add(current_key)
+
+        result.append(current)
+
+        for child in nested_tasks(current):
+            add_task(child, current)
+
+    for task in tasks:
+        add_task(task)
+
+    return result
+
+
+def safe(value):
+    return html.escape(
+        str(value or ""),
+        quote=True,
+    )
+
+
+def write_json(filename, data):
+    with (PUBLIC_DIR / filename).open(
+        "w",
+        encoding="utf-8",
+    ) as file:
+        json.dump(
+            data,
+            file,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+
+def write_csv(tasks, projects_by_id):
+    fields = [
+        "id",
+        "parent_id",
+        "project_id",
+        "project",
+        "title",
+        "status",
+        "is_completed",
+        "overdue",
+        "due_date",
+    ]
+
+    with (PUBLIC_DIR / "weeek_tasks.csv").open(
+        "w",
+        encoding="utf-8-sig",
+        newline="",
+    ) as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=fields,
+        )
+        writer.writeheader()
+
+        for task in tasks:
+            writer.writerow(
+                {
+                    "id": task_id(task),
+                    "parent_id": task_parent_id(task),
+                    "project_id": task_project_id(task),
+                    "project": task_project_name(
+                        task,
+                        projects_by_id,
+                    ),
+                    "title": task_title(task),
+                    "status": task_status(task),
+                    "is_completed": (
+                        "Да"
+                        if task_is_completed(task)
+                        else "Нет"
+                    ),
+                    "overdue": (
+                        "Да"
+                        if task_overdue(task)
+                        else "Нет"
+                    ),
+                    "due_date": task_due_date(task),
+                }
+            )
+
+
+def make_html(tasks, projects):
+    projects_by_id = {
+        str(project.get("id")): project
+        for project in projects
+        if project.get("id") is not None
+    }
+
+    completed_count = sum(
+        task_is_completed(task)
+        for task in tasks
+    )
+
+    overdue_count = sum(
+        task_overdue(task)
+        and not task_is_completed(task)
+        for task in tasks
+    )
+
+    not_started_count = sum(
+        not task_is_completed(task)
+        and not task_overdue(task)
+        for task in tasks
+    )
+
+    status_counts = Counter(
+        task_status(task)
+        for task in tasks
+    )
+
+    project_counts = Counter(
+        task_project_name(task, projects_by_id)
+        for task in tasks
+    )
+
+    task_rows = []
+
+    for task in tasks:
+        title = task_title(task)
+
+        if task_parent_id(task):
+            title = "↳ " + title
+
+        task_rows.append(
+            "<tr>"
+            f"<td>{safe(task_id(task))}</td>"
+            f"<td>{safe(task_project_name(task, projects_by_id))}</td>"
+            f"<td>{safe(title)}</td>"
+            f"<td>{safe(task_status(task))}</td>"
+            f"<td>{safe(task_due_date(task))}</td>"
+            "</tr>"
+        )
+
+    status_rows = "".join(
+        "<tr>"
+        f"<td>{safe(status)}</td>"
+        f"<td>{count}</td>"
+        "</tr>"
+        for status, count in status_counts.most_common()
+    )
+
+    project_rows = "".join(
+        "<tr>"
+        f"<td>{safe(project)}</td>"
+        f"<td>{count}</td>"
+        "</tr>"
+        for project, count in project_counts.most_common()
+    )
+
+    task_rows_html = "".join(task_rows)
+
+    html_document = f"""<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Панель задач Weeek</title>
+  <style>
+    * {{
+      box-sizing: border-box;
+    }}
+
+    body {{
+      margin: 0;
+      background: #f4f6f8;
+      color: #202124;
+      font-family: Arial, sans-serif;
+    }}
+
+    main {{
+      width: min(1400px, 100%);
+      margin: 0 auto;
+      padding: 24px;
+    }}
+
+    .updated {{
+      margin-bottom: 24px;
+      color: #5f6368;
