@@ -1,4 +1,5 @@
 import csv
+import html
 import json
 import os
 from datetime import datetime
@@ -9,7 +10,7 @@ import requests
 
 BASE_DIR = Path(__file__).resolve().parent
 PUBLIC_DIR = BASE_DIR / "public"
-PUBLIC_DIR.mkdir(exist_ok=True)
+PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
 
 TOKEN = os.environ.get("WEEEK_TOKEN")
 
@@ -35,7 +36,10 @@ def get_tasks():
     data = response.json()
 
     if isinstance(data, dict):
-        return data.get("tasks", data.get("data", []))
+        tasks = data.get("tasks")
+        if tasks is None:
+            tasks = data.get("data", [])
+        return tasks
 
     return data
 
@@ -56,8 +60,7 @@ def task_status(task):
         return (
             status.get("name")
             or status.get("title")
-            or status.get("id")
-            or "Не указан"
+            or str(status.get("id", "Не указан"))
         )
 
     return str(status or "Не указан")
@@ -70,8 +73,7 @@ def task_project(task):
         return (
             project.get("name")
             or project.get("title")
-            or project.get("id")
-            or "Без проекта"
+            or str(project.get("id", "Без проекта"))
         )
 
     return str(project or "Без проекта")
@@ -87,10 +89,10 @@ def task_due_date(task):
 
 
 def is_completed(task):
-    value = task.get("completed")
+    completed = task.get("completed")
 
-    if isinstance(value, bool):
-        return value
+    if isinstance(completed, bool):
+        return completed
 
     status = task_status(task).lower()
 
@@ -104,86 +106,4 @@ def is_completed(task):
 
 
 def is_overdue(task):
-    due_date = task_due_date(task)
-
-    if not due_date or is_completed(task):
-        return False
-
-    try:
-        date_text = str(due_date)[:10]
-        due = datetime.strptime(date_text, "%Y-%m-%d").date()
-        return due < datetime.now().date()
-    except ValueError:
-        return False
-
-
-def make_csv(tasks):
-    csv_path = PUBLIC_DIR / "weeek_tasks.csv"
-
-    fieldnames = [
-        "title",
-        "status",
-        "project",
-        "due_date",
-        "completed",
-        "overdue",
-    ]
-
-    with csv_path.open("w", encoding="utf-8-sig", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-
-        for task in tasks:
-            writer.writerow(
-                {
-                    "title": task_title(task),
-                    "status": task_status(task),
-                    "project": task_project(task),
-                    "due_date": task_due_date(task),
-                    "completed": "Да" if is_completed(task) else "Нет",
-                    "overdue": "Да" if is_overdue(task) else "Нет",
-                }
-            )
-
-
-def make_json(tasks):
-    json_path = PUBLIC_DIR / "weeek_tasks.json"
-
-    with json_path.open("w", encoding="utf-8") as file:
-        json.dump(tasks, file, ensure_ascii=False, indent=2)
-
-
-def make_html(tasks):
-    updated_at = datetime.now().strftime("%d.%m.%Y %H:%M")
-
-    total = len(tasks)
-    completed = sum(is_completed(task) for task in tasks)
-    overdue = sum(is_overdue(task) for task in tasks)
-    not_started = total - completed
-
-    projects = {
-        task_project(task)
-        for task in tasks
-    }
-
-    rows = []
-
-    for task in tasks:
-        title = task_title(task)
-        status = task_status(task)
-        project = task_project(task)
-        due_date = task_due_date(task)
-
-        rows.append(
-            f"""
-            <tr>
-              <td>{title}</td>
-              <td>{status}</td>
-              <td>{project}</td>
-              <td>{due_date}</td>
-            </tr>
-            """
-        )
-
-    html = f"""<!doctype html>
-<html lang="ru">
+    due_date =
