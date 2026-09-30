@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Панель задач Weeek</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #f4f6f8;
+      color: #202124;
+      font-family: Arial, sans-serif;
+    }
+
+    main {
+      width: min(1200px, 100%);
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+    }
+
+    h2 {
+      margin-top: 32px;
+    }
+
+    .updated {
+      margin-bottom: 24px;
+      color: #5f6368;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+    }
+
+    .card {
+      padding: 18px;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
+    }
+
+    .number {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 30px;
+      font-weight: bold;
+    }
+
+    .label {
+      color: #5f6368;
+    }
+
+    .table-wrapper {
+      overflow-x: auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
+    }
+
+    table {
+      width: 100%;
+      min-width: 650px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 12px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #eef1f4;
+    }
+
+    .empty {
+      padding: 24px;
+      background: white;
+      border-radius: 12px;
+      color: #5f6368;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Панель задач Weeek</h1>
+    <div class="updated">
+      Данные обновлены: 30.09.2026 12:15
+    </div>
+
+    <section class="cards">
+      <div class="card">
+        <span class="number">20</span>
+        <span class="label">Всего задач</span>
+      </div>
+
+      <div class="card">
+        <span class="number">1</span>
+        <span class="label">Проектов</span>
+      </div>
+
+      <div class="card">
+        <span class="number">0</span>
+        <span class="label">Выполнено</span>
+      </div>
+
+      <div class="card">
+        <span class="number">0</span>
+        <span class="label">Просрочено</span>
+      </div>
+
+      <div class="card">
+        <span class="number">20</span>
+        <span class="label">Не завершено</span>
+      </div>
+    </section>
+
+    <h2>Задачи</h2>
+
+    <div class="table-wrapper"><table><thead><tr><th>Название</th><th>Статус</th><th>Проект</th><th>Срок</th></tr></thead><tbody><tr><td>Разработка веб-панели с коннекторами</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Разобраться почему не работает камера на Полевой</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Просчитать материалы для освещения на заезде к Лесная 20</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Проверить состояние кюветов</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Проверить состояние кустарников и посадок на зиму</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Забрать столбы с Полевой 29</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Заменить прожектор возле Лесная 2</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Видеонаблюдение</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Заказать еще один WiFi мост</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Переводы в резервный фонд</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Просчитать обязательные платежи до конца периода, оплатить что возможно</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Просчитать баланс по долгам Мамай с учетом оплат</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Оплатить Потаповой юр услуги</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Собрать все доки по долгам Мамай, сформировать пакет</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Заменить камеру на втором въезде</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Устранить проблемы с сетью на камере Полевой</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Узнать у Черноморца по чистке снега</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Обследование электроустановок</td><td>Не указан</td><td>Без проекта</td><td></td></tr><tr><td>Ревизия колодцев и скважин на зимний период</td><td>Не указан</td><td>Без проекта</td><td>2026-09-30</td></tr><tr><td>Вбить стойки</td><td>Не указан</td><td>Без проекта</td><td></td></tr></tbody></table></div>
+  </main>
+</body>
+</html>
