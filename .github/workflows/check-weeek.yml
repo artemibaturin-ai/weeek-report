@@ -29,7 +29,6 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
 
       - name: Установить зависимости
         shell: bash
@@ -68,7 +67,25 @@ jobs:
           echo "CLOUDFLARE_API_TOKEN: задан"
           echo "CLOUDFLARE_ACCOUNT_ID: задан"
 
-      - name: Проверить синтаксис Python до запуска
+      - name: Проверить наличие файлов проекта
+        shell: bash
+        run: |
+          test -s weeek_report.py || {
+            echo "::error::Не найден weeek_report.py"
+            exit 1
+          }
+
+          test -s worker.js || {
+            echo "::error::Не найден worker.js"
+            exit 1
+          }
+
+          test -s wrangler.jsonc || {
+            echo "::error::Не найден wrangler.jsonc"
+            exit 1
+          }
+
+      - name: Проверить синтаксис Python
         shell: bash
         run: |
           python -m py_compile weeek_report.py
@@ -106,24 +123,6 @@ jobs:
           echo "Созданные файлы:"
           ls -lah public
 
-      - name: Проверить конфигурацию Cloudflare
-        shell: bash
-        run: |
-          test -s worker.js || {
-            echo "::error::Не найден worker.js в корне репозитория"
-            exit 1
-          }
-
-          test -s wrangler.jsonc || {
-            echo "::error::Не найден wrangler.jsonc в корне репозитория"
-            exit 1
-          }
-
-          echo "Файл worker.js найден"
-          echo "Файл wrangler.jsonc найден"
-          echo "Конфигурация:"
-          cat wrangler.jsonc
-
       - name: Сохранить результат в GitHub
         shell: bash
         run: |
@@ -145,14 +144,33 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: package-lock.json
 
-      - name: Подготовить Wrangler
+      - name: Установить Wrangler
         shell: bash
         run: |
           npm install --global wrangler@4
           wrangler --version
+
+      - name: Проверить конфигурацию Cloudflare
+        shell: bash
+        run: |
+          test -s worker.js || {
+            echo "::error::Не найден worker.js"
+            exit 1
+          }
+
+          test -s wrangler.jsonc || {
+            echo "::error::Не найден wrangler.jsonc"
+            exit 1
+          }
+
+          test -s public/index.html || {
+            echo "::error::Не найден public/index.html"
+            exit 1
+          }
+
+          echo "Конфигурация Cloudflare:"
+          cat wrangler.jsonc
 
       - name: Проверить доступ Cloudflare
         shell: bash
