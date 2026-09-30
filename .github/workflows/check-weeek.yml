@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   update-and-deploy:
-    name: Получение всех данных и деплой
+    name: Получение всех задач и деплой
     runs-on: ubuntu-24.04
 
     steps:
@@ -58,21 +58,14 @@ jobs:
             exit 1
           }
 
-          echo "Все секреты заданы"
-
-      - name: Проверить исходные файлы
-        shell: bash
-        run: |
-          test -s weeek_report.py
-          test -s worker.js
-          test -s wrangler.jsonc
+          echo "Все необходимые секреты заданы"
 
       - name: Проверить синтаксис Python
         shell: bash
         run: |
           python -m py_compile weeek_report.py
 
-      - name: Создать панель со всеми задачами и проектами
+      - name: Создать панель
         shell: bash
         env:
           WEEEK_TOKEN: ${{ secrets.WEEEK_TOKEN }}
@@ -86,11 +79,61 @@ jobs:
           test -s public/weeek_tasks.csv
           test -s public/weeek_tasks.json
           test -s public/weeek_projects.json
+          test -s public/weeek_raw_tasks.json
 
-          echo "Содержимое public:"
-          ls -lah public
+          python - <<'PY'
+          import json
+          from pathlib import Path
 
-      - name: Сохранить все данные в GitHub
+          tasks = json.loads(
+              Path("public/weeek_tasks.json")
+              .read_text(encoding="utf-8")
+          )
+
+          projects = json.loads(
+              Path("public/weeek_projects.json")
+              .read_text(encoding="utf-8")
+          )
+
+          if not isinstance(tasks, list):
+              raise SystemExit("weeek_tasks.json не является списком")
+
+          if not isinstance(projects, list):
+              raise SystemExit("weeek_projects.json не является списком")
+
+          if len(tasks) < 27:
+              raise SystemExit(
+                  f"Получено только {len(tasks)} задач, ожидалось минимум 27"
+              )
+
+          task_213 = next(
+              (
+                  task for task in tasks
+                  if str(task.get("id")) == "213"
+              ),
+              None,
+          )
+
+          if task_213 is None:
+              raise SystemExit("Задача 213 не найдена")
+
+          if task_213.get("status") != "Выполнено":
+              raise SystemExit(
+                  "У задачи 213 неверный статус: "
+                  + repr(task_213.get("status"))
+              )
+
+          if task_213.get("isCompleted") is not True:
+              raise SystemExit(
+                  "У задачи 213 isCompleted не равен true"
+              )
+
+          print(f"Проверка пройдена: задач={len(tasks)}")
+          print(f"Проверка пройдена: проектов={len(projects)}")
+          print(f"Проверка пройдена: задача 213={task_213}")
+          PY
+
+      - name: Сохранить данные в GitHub
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -100,11 +143,12 @@ jobs:
           git add public/weeek_tasks.csv
           git add public/weeek_tasks.json
           git add public/weeek_projects.json
+          git add public/weeek_raw_tasks.json
 
           if git diff --cached --quiet; then
             echo "Изменений для коммита нет"
           else
-            git commit -m "Обновление всех задач и проектов Weeek"
+            git commit -m "Обновление всех задач Weeek"
             git push origin HEAD:main
           fi
 
@@ -119,12 +163,14 @@ jobs:
           npm install --global wrangler@4
           wrangler --version
 
-      - name: Проверить конфигурацию Cloudflare
+      - name: Проверить конфигурацию Worker
         shell: bash
         run: |
           test -s worker.js
           test -s wrangler.jsonc
           test -s public/index.html
+
+          echo "wrangler.jsonc:"
           cat wrangler.jsonc
 
       - name: Проверить доступ Cloudflare
